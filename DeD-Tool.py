@@ -2,7 +2,7 @@ import requests
 import os
 import sys
 
-__VERSION__ = "1.0.1"  # La versione corrente del mio script
+__VERSION__ = "1.0.1"  # La versione corrente del tuo script
 
 # 🔗 URL diretti ai file nel repository GitHub
 VERSION_URL = "https://raw.githubusercontent.com/MaxTrevi/DeD-Tool/main/version.txt"
@@ -17,11 +17,12 @@ def check_for_updates():
         if latest_version > __VERSION__:
             print(f"\n🟡 È disponibile una nuova versione: {latest_version}. Aggiornamento in corso...")
 
-            new_code = requests.get(SCRIPT_URL).text
+            response = requests.get(SCRIPT_URL, timeout=5)
+            response.raise_for_status()
             script_path = os.path.abspath(__file__)
 
-            with open(script_path, 'w', encoding='utf-8') as f:
-                f.write(new_code)
+            with open(script_path, 'wb') as f:
+                f.write(response.content)
 
             print("✅ Aggiornamento completato. Riavvia il programma.")
             input("Premi Invio per chiudere...")
@@ -4232,7 +4233,7 @@ if __name__ == "__main__":
     # Ciclo di login/registrazione iniziale
     while True:
         tool._clear_screen()
-        print("--- Benvenuto D&D Tool V1.0---")
+        print("--- Benvenuto D&D Tool By Max---")
         print("1. Login")
         print("0. Esci")
         
