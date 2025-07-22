@@ -2,42 +2,11 @@ import requests
 import os
 import sys
 
-def download_file_from_google_drive(file_id, destination):
-    """Scarica correttamente anche file .py bloccati da Google per sicurezza"""
-    URL = "https://drive.google.com/uc?export=download"
-    session = requests.Session()
+__VERSION__ = "1.0.1"  # La versione corrente del mio script
 
-    # Primo tentativo: otteniamo il token di conferma
-    response = session.get(URL, params={"id": file_id}, stream=True)
-    token = get_confirm_token(response)
-
-    if token:
-        # Scarichiamo con il token di conferma
-        params = {"id": file_id, "confirm": token}
-        response = session.get(URL, params=params, stream=True)
-
-    save_response_content(response, destination)
-    print(f"✅ File scaricato correttamente: {destination}")
-
-def get_confirm_token(response):
-    """Estrae il token di conferma dal cookie se presente"""
-    for key, value in response.cookies.items():
-        if key.startswith("download_warning"):
-            return value
-    return None
-
-def save_response_content(response, destination, chunk_size=32768):
-    """Salva il contenuto della risposta in un file locale"""
-    with open(destination, "wb") as f:
-        for chunk in response.iter_content(chunk_size):
-            if chunk:
-                f.write(chunk)
-
-
-__VERSION__ = "1.0.0"  # aggiorna ogni nuova release
-
-VERSION_URL = "https://drive.google.com/uc?export=download&id=155eR2NBGgCIvKb4Ew9-6_wTYoo8szhHD"  # version.txt
-SCRIPT_FILE_ID = "1H7yzz5DMxd6e9l_oQn0HylZ0F2s6bR9g"  # ID file .py su Drive
+# 🔗 URL diretti ai file nel repository GitHub
+VERSION_URL = "https://raw.githubusercontent.com/MaxTrevi/DeD-Tool/main/version.txt"
+SCRIPT_URL = "https://raw.githubusercontent.com/MaxTrevi/DeD-Tool/main/DeD-Tool.py"
 
 def check_for_updates():
     try:
@@ -46,17 +15,22 @@ def check_for_updates():
         latest_version = response.text.strip()
 
         if latest_version > __VERSION__:
-            print(f"\n🟡 Nuova versione disponibile: {latest_version}. Scarico aggiornamento...")
+            print(f"\n🟡 È disponibile una nuova versione: {latest_version}. Aggiornamento in corso...")
+
+            new_code = requests.get(SCRIPT_URL).text
             script_path = os.path.abspath(__file__)
-            download_file_from_google_drive(SCRIPT_FILE_ID, script_path)
+
+            with open(script_path, 'w', encoding='utf-8') as f:
+                f.write(new_code)
+
             print("✅ Aggiornamento completato. Riavvia il programma.")
             input("Premi Invio per chiudere...")
             sys.exit(0)
-
     except Exception as e:
-        print(f"⚠️ Errore nel controllo aggiornamenti: {e}")
+        print(f"⚠️ Errore durante il controllo aggiornamenti: {e}")
 
-check_for_updates()  # 👈 LANCIA IL CONTROLLO VERSIONE
+# 🔁 Esegui il controllo all'avvio del programma
+check_for_updates()
 
 import base64
 from cryptography.fernet import Fernet
@@ -80,7 +54,7 @@ client = OpenAI(
 
 def show_welcome_message():
     print("=" * 60)
-    print("🎲 Benvenuto su D&D Tool V.1.0.0".center(60))
+    print("🎲 Benvenuto su D&D Tool V.1.0.1".center(60))
     print("👨‍💻 Creato da Massimo Trevisan".center(60))
     print("=" * 60)
     print()
