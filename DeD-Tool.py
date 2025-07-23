@@ -47,6 +47,8 @@ from openai import OpenAI
 import smtplib
 from email.message import EmailMessage
 from tabulate import tabulate
+import tempfile
+import shutil
 
 client = OpenAI(
     base_url="http://localhost:1234/v1",  # ← questa è la porta del server LM Studio
@@ -2076,7 +2078,6 @@ class DeDTool:
         # URL GitHub versione e PDF
         VERSION_URL = "https://raw.githubusercontent.com/MaxTrevi/DeD-Tool/main/diario_version.txt"
         PDF_URL = "https://raw.githubusercontent.com/MaxTrevi/DeD-Tool/main/Diario_Campagna.pdf"
-        DEST_PATH = "Diario_Campagna.pdf"
 
         try:
             # Step 1: ottieni versione locale dell'utente
@@ -2088,6 +2089,10 @@ class DeDTool:
             response.raise_for_status()
             ultima_versione_online = response.text.strip()
 
+            # Costruisci il nome del file dinamico con versione
+            nome_file_pdf = f"Diario_Campagna.{ultima_versione_online}.pdf"
+            DEST_PATH = os.path.join(os.getcwd(), nome_file_pdf)
+
             if versione_locale == ultima_versione_online:
                 print(f"✅ Hai già l'ultima versione del Diario della Campagna. (Versione: {versione_locale})")
             else:
@@ -2096,14 +2101,20 @@ class DeDTool:
                 print(f"🔸 Versione disponibile: {ultima_versione_online}")
                 print("📥 Download in corso...")
 
-                # Scarica PDF
-                r = requests.get(PDF_URL)
-                with open(DEST_PATH, 'wb') as f:
-                    f.write(r.content)
+                # Scarica su file temporaneo
+                r = requests.get(PDF_URL, stream=True)
+                r.raise_for_status()
 
+                with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk:
+                            tmp_file.write(chunk)
+                    temp_path = tmp_file.name
+
+                shutil.move(temp_path, DEST_PATH)
                 print(f"\n✅ Diario scaricato con successo in: {DEST_PATH}")
 
-                # Aggiorna la versione su Supabase per l'utente
+                # Aggiorna la versione su Supabase
                 self.supabase_admin.from_("users").update({
                     "diario_version": ultima_versione_online
                 }).eq("id", utente['id']).execute()
@@ -4038,19 +4049,19 @@ class DeDTool:
         while True:
             self._clear_screen()
             print(f"--- Menu Principale ({self.current_user['username']} - {self.current_user['role']}) ---")
-            print("1. Gestione PG")
-            print("2. Gestione Banche")
-            print("3. Gestione Seguaci")
-            print("4. Gestione Attività Economiche")
-            print("5. Gestione Spese Fisse")
-            print("6. Gestione Tempo (Solo DM)")
-            print("7. Esporta Fondi PG in Excel (Solo DM)")
-            print("8. Backup/Restore Database (Solo DM)")
-            print("9. Visualizza Stato (DM/GIOCATORE)")
+            print("1.  🧝 Gestione PG")
+            print("2.  🏦 Gestione Banche")
+            print("3.  🛡️ Gestione Seguaci")
+            print("4.  ⚒️ Gestione Attività Economiche")
+            print("5.  💰 Gestione Spese Fisse")
+            print("6.  ⏳ Gestione Tempo (Solo DM)")
+            print("7.  📊 Esporta Fondi PG in Excel (Solo DM)")
+            print("8.  💾 Backup/Restore Database (Solo DM)")
+            print("9.  🔍 Visualizza Stato (DM/GIOCATORE)")
             if self.current_user and self.current_user['role'] == 'DM':
-                print("10. Gestione Utenti (Solo DM)")
-            print("11. Scarica Diario della Campagna 📘")
-            print("0. Logout")
+                print("10. 👥 Gestione Utenti (Solo DM)")
+            print("11. 📘 Scarica Diario della Campagna")
+            print("0.  🚪 Logout")
 
             choice = input("Scegli un'opzione: ")
 
