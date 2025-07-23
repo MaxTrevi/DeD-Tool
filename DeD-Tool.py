@@ -2,7 +2,7 @@ import requests
 import os
 import sys
 
-__VERSION__ = "1.0.1"  # La versione corrente del tuo script
+__VERSION__ = "1.0.1"  # La versione corrente del mio script
 
 # 🔗 URL diretti ai file nel repository GitHub
 VERSION_URL = "https://raw.githubusercontent.com/MaxTrevi/DeD-Tool/main/version.txt"
@@ -2068,6 +2068,55 @@ class DeDTool:
                 print("Opzione non valida. Riprova.")
                 input("\nPremi Invio per continuare...")
 
+
+    def scarica_diario_campagna_supabase(self):
+        self._clear_screen()
+        print("📘 Controllo Diario della Campagna...\n")
+
+        # URL GitHub versione e PDF
+        VERSION_URL = "https://raw.githubusercontent.com/MaxTrevi/DeD-Tool/main/diario_version.txt"
+        PDF_URL = "https://raw.githubusercontent.com/MaxTrevi/DeD-Tool/main/Diario_Campagna.pdf"
+        DEST_PATH = "Diario_Campagna.pdf"
+
+        try:
+            # Step 1: ottieni versione locale dell'utente
+            utente = self.current_user
+            versione_locale = utente.get('diario_version')
+
+            # Step 2: ottieni ultima versione online
+            response = requests.get(VERSION_URL, timeout=5)
+            response.raise_for_status()
+            ultima_versione_online = response.text.strip()
+
+            if versione_locale == ultima_versione_online:
+                print(f"✅ Hai già l'ultima versione del Diario della Campagna. (Versione: {versione_locale})")
+            else:
+                print(f"📘 Nuova versione disponibile del Diario della Campagna!")
+                print(f"🔹 Versione attuale: {versione_locale or 'Nessuna'}")
+                print(f"🔸 Versione disponibile: {ultima_versione_online}")
+                print("📥 Download in corso...")
+
+                # Scarica PDF
+                r = requests.get(PDF_URL)
+                with open(DEST_PATH, 'wb') as f:
+                    f.write(r.content)
+
+                print(f"\n✅ Diario scaricato con successo in: {DEST_PATH}")
+
+                # Aggiorna la versione su Supabase per l'utente
+                self.supabase_admin.from_("users").update({
+                    "diario_version": ultima_versione_online
+                }).eq("id", utente['id']).execute()
+
+                # Aggiorna localmente la copia dell'utente corrente
+                self.current_user['diario_version'] = ultima_versione_online
+
+        except Exception as e:
+            print(f"❌ Errore durante il controllo o download del Diario: {e}")
+
+        input("\nPremi Invio per tornare al menu...")
+
+
     def list_users(self):
         self._clear_screen()
         print("--- Lista Utenti ---")
@@ -3999,7 +4048,8 @@ class DeDTool:
             print("8. Backup/Restore Database (Solo DM)")
             print("9. Visualizza Stato (DM/GIOCATORE)")
             if self.current_user and self.current_user['role'] == 'DM':
-                print("10. Gestione Utenti (Solo DM)") # Existing but promoting it
+                print("10. Gestione Utenti (Solo DM)")
+            print("11. Scarica Diario della Campagna 📘")
             print("0. Logout")
 
             choice = input("Scegli un'opzione: ")
@@ -4015,9 +4065,9 @@ class DeDTool:
             elif choice == '5':
                 self.fixed_expense_menu()
             elif choice == '6':
-                self.manage_time_menu() # New
+                self.manage_time_menu()
             elif choice == '7':
-                self.export_pg_funds_to_excel() # New
+                self.export_pg_funds_to_excel()
             elif choice == "8":
                 if self.current_user['role'] == 'DM':
                     self.backup_restore_menu()
@@ -4025,9 +4075,11 @@ class DeDTool:
                     print("⚠️ Solo il DM può accedere a questa funzione.")
                     input("\nPremi Invio per continuare...")
             elif choice == '9':
-                self.view_status() # New
-            elif choice == '10' and self.current_user and self.current_user['role'] == 'DM':
+                self.view_status()
+            elif choice == '10' and self.current_user['role'] == 'DM':
                 self.manage_users()
+            elif choice == '11':
+                self.scarica_diario_campagna_supabase()  
             elif choice == '0':
                 self.current_user = None
                 print("Logout effettuato.")
