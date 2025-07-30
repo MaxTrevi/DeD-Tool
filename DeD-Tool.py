@@ -184,7 +184,7 @@ class DeDTool:
             response = self.supabase.from_('game_state').select('*').execute()
             if response.data:
                 # Assuming there's only one row for game state with id 1
-                date_str = response.data[0]['current_date']
+                date_str = response.data[0]['game_date']
                 return datetime.strptime(date_str, '%Y-%m-%d').date()
             else:
                 # Initialize if no date is found (e.g., first run)
@@ -192,7 +192,7 @@ class DeDTool:
                 initial_date = datetime(1, 1, 1).date() # Year 1, Month 1, Day 1
                 # Ensure game_state table has an 'id' column for updates
                 # For first insert, it might generate its own UUID if ID not specified or serial
-                self.supabase_admin.from_('game_state').insert({"id": 1, "current_date": initial_date.strftime('%Y-%m-%d')}).execute()
+                self.supabase_admin.from_('game_state').insert({"id": 1, "game_date": initial_date.strftime('%Y-%m-%d')}).execute()
                 return initial_date
         except Exception as e:
             print(f"Errore nel caricamento della data di gioco: {e}")
@@ -211,7 +211,7 @@ class DeDTool:
         try:
             # Assumes 'game_state' has a row with id 1. If not, needs a different upsert strategy.
             response = self.supabase_admin.from_('game_state').update(
-                {"current_date": self.game_date.strftime('%Y-%m-%d')}
+                {"game_date": self.game_date.strftime('%Y-%m-%d')}
             ).eq('id', 1).execute() 
             
             if not response.data:
@@ -221,7 +221,7 @@ class DeDTool:
                 # For simplicity, if update fails, we might just re-insert. Or better, check if exists and then update/insert.
                 check_response = self.supabase.from_('game_state').select('id').eq('id', 1).execute()
                 if not check_response.data: # If no row with id 1 exists, insert it
-                    self.supabase_admin.from_('game_state').insert({"id": 1, "current_date": self.game_date.strftime('%Y-%m-%d')}).execute()
+                    self.supabase_admin.from_('game_state').insert({"id": 1, "game_date": self.game_date.strftime('%Y-%m-%d')}).execute()
                 else: # If it exists but update failed, something else is wrong
                     print(f"Avviso: Data di gioco non salvata con ID 1, ma una riga esiste. Controllare database.")
         except Exception as e:
@@ -3460,12 +3460,12 @@ class DeDTool:
             from datetime import date
 
             if isinstance(self.game_date, (datetime, date)):
-                current_date = datetime.combine(self.game_date, datetime.min.time())
+                game_date = datetime.combine(self.game_date, datetime.min.time())
             else:
-                current_date = datetime.strptime(str(self.game_date), "%Y-%m-%d")
+                game_date = datetime.strptime(str(self.game_date), "%Y-%m-%d")
 
             # Aggiungi i mesi
-            new_date = current_date + relativedelta(months=months)
+            new_date = game_date + relativedelta(months=months)
             self.game_date = new_date  # lascia che rimanga un oggetto datetime
 
             # Aggiorna in Supabase
@@ -3556,7 +3556,7 @@ class DeDTool:
             formatted_date = new_date.strftime('%Y-%m-%d') if isinstance(new_date, datetime) else str(new_date)
 
             self.supabase_admin.from_('game_state') \
-                .update({'current_date': formatted_date}) \
+                .update({'game_date': formatted_date}) \
                 .eq('id', 1).execute()
 
             print("📅 Data aggiornata nel database.")
@@ -3848,7 +3848,8 @@ class DeDTool:
         tables_to_backup = [
             'users', 
             'player_characters', 
-            'banks', 
+            'banks',
+            'bank_transactions',            
             'followers', 
             'economic_activities', 
             'fixed_expenses',
