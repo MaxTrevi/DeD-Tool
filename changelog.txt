@@ -1,0 +1,32 @@
+# CHANGELOG - D&D Tool
+
+## VERSIONE 1.0.4 (Data di rilascio)
+### Nuove Funzionalità:
+- Sistema di notifiche per oggetti in banca
+- DM può eliminare oggetti venduti/ritirati
+- Popup dettagli oggetti con data Mystara
+
+### Miglioramenti:
+- Finestre di dialogo ora rimangono in primo piano
+- Pulsanti meglio organizzati nel menu banche
+- Corretta visualizzazione nome banca invece di ID
+
+### Bug Fix:
+- Risolto problema chiusura finestre dettagli
+- Corretta conversione date in formato Mystara
+- Fix notifiche per giocatori
+
+---
+
+## VERSIONE 1.0.3 (Precedente)
+### Nuove Funzionalità:
+- Sistema completo deposito/ritiro/vendita oggetti
+- Trattativa prezzo tra giocatore e DM
+- Stato oggetti: Depositato, In vendita, Rifiutato, Venduto, Ritirato
+
+### Miglioramenti:
+- Interfaccia oggetti in banca migliorata
+- Colonne più larghe per migliore leggibilità
+- Pulsanti contestuali per DM e giocatori
+
+---
