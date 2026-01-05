@@ -1,32 +1,50 @@
 # CHANGELOG - D&D Tool
 
-## VERSIONE 1.0.4 (Data di rilascio)
+## VERSIONE 1.0.3 (Data di rilascio 05/01/2026)
 ### Nuove Funzionalità:
-- Sistema di notifiche per oggetti in banca
-- DM può eliminare oggetti venduti/ritirati
+- Aggiunto nel menu "informazioni" il ChangeLog un file che descrive i cambiamenti al programma
+- Sistema completo deposito/ritiro/vendita oggetti nelle banche
+- Trattativa prezzo oggetti tra giocatore e DM
+- Stato oggetti: Depositato, In vendita, Rifiutato, Venduto, Ritirato
+- Sistema di notifiche per oggetti in banca che vengono valutati o rifiutati
+- DM può eliminare oggetti venduti/ritirati dai personaggi
 - Popup dettagli oggetti con data Mystara
 
 ### Miglioramenti:
 - Finestre di dialogo ora rimangono in primo piano
 - Pulsanti meglio organizzati nel menu banche
-- Corretta visualizzazione nome banca invece di ID
 
-### Bug Fix:
-- Risolto problema chiusura finestre dettagli
-- Corretta conversione date in formato Mystara
-- Fix notifiche per giocatori
 
----
+## VERSIONE 1.0.2 (Precedente anno di sviluppo 2025)
+1° Versione rilasciata
+Il software si auto aggiorna da solo se trova una versione più recente in rete
+Menu aperti ai giocatori:
 
-## VERSIONE 1.0.3 (Precedente)
-### Nuove Funzionalità:
-- Sistema completo deposito/ritiro/vendita oggetti
-- Trattativa prezzo tra giocatore e DM
-- Stato oggetti: Depositato, In vendita, Rifiutato, Venduto, Ritirato
+Menu 1 voce 	2 "Lista PG"
+Menu 2 voce 	2 "Lista Conti"
+		5 "Deposita Denaro"
+		6 "preleva Denaro"
+		7 "Trasferisci Fondi tra Banche"
+		8 "Visualizza Storico Operazioni"
+Menu 3 voce	2 "Lista Seguaci"
+		9 "Lista Obiettivi Dettagliata"
+		10 "Visualizza Cronologia Imprevisti"
+Menu 4 voce	2 "Lista Attività Economiche"
+Menu 5 voce	2 "Lista Spese Fisse"
+Menu 9 voce	9 "Visualizza Stato (DM/GIOCATORE)"
+Menu 11		Scarica Diario della Campagna
+Menu 12		Chat
 
-### Miglioramenti:
-- Interfaccia oggetti in banca migliorata
-- Colonne più larghe per migliore leggibilità
-- Pulsanti contestuali per DM e giocatori
+Avrete sempre sotto controllo:
 
----
+i fondi bancari con gli interessi maturati
+le attività economiche
+le spese fisse.
+
+Tutti questi elementi verranno aggiornati automaticamente con il passare del tempo, insieme al progresso mensile e alla percentuale di completamento degli obiettivi dei vostri seguaci, anche in termini di passaggio di livello.
+
+Inoltre, il DM potrà modificare in qualsiasi momento seguaci, attività, spese, e altri dati in base all’evoluzione della campagna: ad esempio, al cambio di livello, mansione o situazione economica.
+
+La possibilità di scaricare il diario della campagna è molto utile perché il software controlla se siete già in possesso dell'ultima versione e vi da la possibilità di fare il download della stessa in caso vi siano degli update da parte mia.
+
+Infine, la chat permette di scambiarsi messaggi sia privati che in comune, cosa molto utile in alcune circostanze.
