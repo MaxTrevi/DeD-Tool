@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox, scrolledtext, simpledialog
 import requests
 import os
 import sys
@@ -17,7 +17,7 @@ import re
 import threading
 from dbutils.pooled_db import PooledDB
 
-__VERSION__ = "1.0.2"
+__VERSION__ = "1.0.3"
 
 # URL per aggiornamenti
 VERSION_URL = "https://raw.githubusercontent.com/MaxTrevi/DeD-Tool/main/version.txt"
@@ -137,19 +137,33 @@ class DeDToolGUI:
         try:
             print("Chiusura applicazione in corso...")
             
-            # 1. Chiudi tutte le finestre chat aperte
+            # 1. Chiudi tutte le finestre chat aperte e ferma polling
             self._close_all_chat_windows()
             
-            # 2. Chiudi connessioni database
+            # 2. Ferma eventuali altri polling (come la chat comune nei tab)
+            if hasattr(self, 'content_frame'):
+                for widget in self.content_frame.winfo_children():
+                    if hasattr(widget, 'after_id'):
+                        try:
+                            widget.after_cancel(widget.after_id)
+                        except:
+                            pass
+            
+            # 3. Chiudi connessioni database
             if hasattr(self, 'db') and self.db:
                 self.db.close()
                 print("✓ Connessione database chiusa")
             
-            # 3. Chiudi connection pool
+            # 4. Chiudi connection pool
             if hasattr(self, '_pool_initialized') and self._pool_initialized:
-                print("✓ Connection pool cleanup")
+                if self.connection_pool:
+                    try:
+                        self.connection_pool.close()
+                        print("✓ Connection pool chiuso")
+                    except:
+                        pass
             
-            # 4. Distruggi la finestra principale
+            # 5. Distruggi la finestra principale
             self.root.quit()
             self.root.destroy()
             
@@ -166,6 +180,60 @@ class DeDToolGUI:
         self.root.bind('<F11>', lambda e: self.toggle_fullscreen())
         self.root.bind('<Control-q>', lambda e: self.on_closing())
         self.root.bind('<Escape>', lambda e: self.root.attributes('-fullscreen', False))
+
+    def show_simple_changelog(self):
+        """Mostra il changelog in una finestra semplice - versione minimalista"""
+        try:
+            CHANGELOG_URL = "https://raw.githubusercontent.com/MaxTrevi/DeD-Tool/main/changelog.txt"
+            
+            # Scarica il changelog
+            response = requests.get(CHANGELOG_URL, timeout=5)
+            response.raise_for_status()
+            changelog_text = response.text
+            
+            # Finestra semplice
+            win = tk.Toplevel(self.root)
+            win.title(f"Changelog - Versione {__VERSION__}")
+            win.geometry("800x500")
+            win.transient(self.root)
+            
+            # Frame principale
+            main_frame = ttk.Frame(win)
+            main_frame.pack(fill='both', expand=True, padx=10, pady=10)
+            
+            # Titolo
+            title = ttk.Label(main_frame, 
+                             text=f"Registro delle Modifiche - Versione Attuale: {__VERSION__}",
+                             font=('Arial', 11, 'bold'))
+            title.pack(pady=10)
+            
+            # Separatore
+            ttk.Separator(main_frame, orient='horizontal').pack(fill='x', pady=5)
+            
+            # Text widget con scrollbar (semplice)
+            text_widget = tk.Text(main_frame, wrap='word', height=20, font=('Courier', 9))
+            scrollbar = ttk.Scrollbar(main_frame, orient='vertical', command=text_widget.yview)
+            text_widget.configure(yscrollcommand=scrollbar.set)
+            
+            # Layout
+            text_widget.pack(side='left', fill='both', expand=True, padx=(0, 5))
+            scrollbar.pack(side='right', fill='y')
+            
+            # Inserisci il testo e rendilo readonly
+            text_widget.insert('1.0', changelog_text)
+            text_widget.config(state='disabled')
+            
+            # Pulsante Chiudi
+            ttk.Button(main_frame, text="Chiudi", 
+                      command=win.destroy).pack(pady=10)
+            
+            # Focus sulla finestra
+            win.focus_set()
+            
+        except Exception as e:
+            messagebox.showerror("Errore", 
+                               f"Impossibile caricare il changelog:\n\n{e}\n\n"
+                               f"Assicurati di avere connessione internet.")
 
     def setup_menu_bar(self):
         """Configura la barra dei menu principale"""
@@ -184,10 +252,11 @@ class DeDToolGUI:
         view_menu.add_command(label="Normale", command=lambda: self.root.attributes('-fullscreen', False))
         menubar.add_cascade(label="Visualizza", menu=view_menu)
         
-        # Menu Aiuto
-        help_menu = tk.Menu(menubar, tearoff=0)
-        help_menu.add_command(label="Informazioni", command=self.show_about)
-        menubar.add_cascade(label="Aiuto", menu=help_menu)
+        # ⭐⭐ NUOVO MENU: Informazioni
+        info_menu = tk.Menu(menubar, tearoff=0)
+        info_menu.add_command(label="Changelog", command=self.show_simple_changelog)
+        info_menu.add_command(label="Informazioni", command=self.show_about)
+        menubar.add_cascade(label="Informazioni", menu=info_menu)
         
         self.root.config(menu=menubar)
 
@@ -275,25 +344,6 @@ class DeDToolGUI:
             
         except Exception as e:
             print(f"❌ Errore configurazione stili: {e}")
-
-
-    def _absolute_day_from_date(self, d):
-        """
-        Restituisce absolute_day (INT) a partire da un oggetto date.
-        Base: date(1,1,1) => absolute_day 0 corrisponde a 0001-01-01.
-        """
-        if isinstance(d, datetime):
-            d = d.date()
-        # date.toordinal() parte da 1 per 0001-01-01 -> toordinal() - 1 => 0-based days
-        return d.toordinal() - date(1, 1, 1).toordinal()
-
-    def _date_from_absolute_day(self, abs_day):
-        """Restituisce un oggetto date a partire da absolute_day INT."""
-        base_ordinal = date(1, 1, 1).toordinal()
-        try:
-            return date.fromordinal(base_ordinal + int(abs_day))
-        except Exception:
-            return date.today()
         
     def load_secure_env(self):
         """Carica le variabili d'ambiente sicure"""
@@ -576,13 +626,6 @@ class DeDToolGUI:
             self.append_time_log(f"Errore conversione data: {e}")
             return str(date_obj)
 
-    def _get_mystara_year_from_date(self, d):
-        """Restituisce l'anno Mystara dato un date/datetime."""
-        if isinstance(d, datetime):
-            d = d.date()
-        absd = self._absolute_day_from_date(d)
-        return 1 + (absd // self.DAYS_PER_YEAR)
-
     def save_game_date(self):
         """
         Salva la data di gioco corrente su MariaDB.
@@ -790,7 +833,10 @@ class DeDToolGUI:
         
         # Pulsante chat
         chat_text = "💬 Chat"
-        unread_total = self._count_unread_messages_fast()
+        
+        counts = self._count_unread_by_category_fast()
+        unread_total = counts["comune"] + counts["segreti"]
+        
         if unread_total > 0:
             chat_text = f"💬 Chat ({unread_total})"
         
@@ -798,7 +844,7 @@ class DeDToolGUI:
         chat_btn.grid(row=row, column=0, padx=10, pady=3)
         row += 1
         self.chat_button = chat_btn
-        
+                
         # Altri menu visibili a tutti
         menu_items.extend([
             ("📊 Stato Campagna", self.show_status),
@@ -994,7 +1040,7 @@ class DeDToolGUI:
                 print(f"Errore nel fermare il lampeggio: {e}")
     
     def show_welcome_content(self):
-        """Mostra il contenuto di benvenuto con dettagli in due colonne"""
+        """Mostra il contenuto di benvenuto con banner notifiche - VERSIONE MODIFICATA"""
         self.clear_content()
         
         welcome = ttk.Label(self.content_frame, 
@@ -1002,7 +1048,66 @@ class DeDToolGUI:
                            style='Title.TLabel')
         welcome.pack(pady=10)
         
-        # 🔹 AGGIUNTA: Versione del software
+        # 🔥 BANNER NOTIFICHE SEMPLICE
+        cursor = self.db.cursor()
+        
+        if self.current_user['role'] == 'DM':
+            # Conta richieste di vendita
+            cursor.execute("""
+                SELECT COUNT(*) as count 
+                FROM bank_items 
+                WHERE status = 'IN_VALUTAZIONE' AND dm_notified = FALSE
+            """)
+            result = cursor.fetchone()
+            
+            if result and result['count'] > 0:
+                notification_frame = ttk.Frame(self.content_frame, relief='raised', borderwidth=2)
+                notification_frame.pack(fill='x', padx=20, pady=10)
+                
+                ttk.Label(notification_frame, 
+                         text=f"⭐ Hai {result['count']} richiesta(e) di vendita in attesa!",
+                         font=('Arial', 10, 'bold'),
+                         foreground='red').pack(pady=5)
+                
+                ttk.Button(notification_frame, 
+                          text="📋 Vedi tutte le richieste",
+                          command=self.show_all_sale_requests,
+                          width=25).pack(pady=5)
+        else:
+            # Conta notifiche giocatore
+            cursor.execute("""
+                SELECT COUNT(*) as count 
+                FROM bank_items bi
+                JOIN player_characters pc ON bi.pg_id = pc.id
+                WHERE pc.user_id = %s 
+                AND (
+                    (bi.status = 'RIFIUTATO' AND bi.player_notified = FALSE) OR
+                    (bi.status = 'IN_VALUTAZIONE' AND EXISTS (
+                        SELECT 1 FROM bank_item_evaluations 
+                        WHERE item_id = bi.id AND evaluator_role = 'DM'
+                    ) AND bi.player_notified = FALSE)
+                )
+            """, (self.current_user['id'],))
+            
+            result = cursor.fetchone()
+            
+            if result and result['count'] > 0:
+                notification_frame = ttk.Frame(self.content_frame, relief='raised', borderwidth=2)
+                notification_frame.pack(fill='x', padx=20, pady=10)
+                
+                ttk.Label(notification_frame, 
+                         text=f"⭐ Hai {result['count']} notifica(e) non lette!",
+                         font=('Arial', 10, 'bold'),
+                         foreground='blue').pack(pady=5)
+                
+                ttk.Button(notification_frame, 
+                          text="📋 Vedi le tue notifiche",
+                          command=self.show_player_notifications_simple,
+                          width=25).pack(pady=5)
+        
+        cursor.close()
+        
+        # Versione del software
         version_label = ttk.Label(self.content_frame,
                                  text=f"Versione {__VERSION__}",
                                  style='Info.TLabel',
@@ -1016,7 +1121,7 @@ class DeDToolGUI:
                         style='Info.TLabel')
         info.pack(pady=20)
         
-        # 🔹 MODIFICA: Container per le due colonne
+        # Container per le due colonne
         columns_container = ttk.Frame(self.content_frame)
         columns_container.pack(pady=10, padx=20, fill='both', expand=True)
         
@@ -1126,9 +1231,19 @@ class DeDToolGUI:
             messagebox.showerror("Errore", f"Errore caricamento dettagli: {e}")
 
     def clear_content(self):
-        """Pulisce il frame del contenuto"""
         for widget in self.content_frame.winfo_children():
             widget.destroy()
+
+        # 🔥 Invalida SOLO ciò che esiste davvero
+        for attr in (
+            "tree_imprevisti",
+            "imprevisti_listbox",
+            "objectives_tree",
+            "tree_users",
+            "tree_characters",
+        ):
+            if hasattr(self, attr):
+                setattr(self, attr, None)
 
     def send_email_notification(self, to_email, subject, body):
         smtp_server = "smtp.gmail.com"
@@ -1412,41 +1527,80 @@ class DeDToolGUI:
         """Mostra la gestione delle banche"""
         self.clear_content()
 
-        title = ttk.Label(self.content_frame, text="🏦 Gestione Banche", style='Title.TLabel')
+        title = ttk.Label(
+            self.content_frame,
+            text="🏦 Gestione Banche",
+            style='Title.TLabel'
+        )
         title.pack(pady=10)
 
-        btn_frame = ttk.Frame(self.content_frame)
-        btn_frame.pack(pady=10)
+        # PRIMA RIGA di pulsanti
+        btn_frame_row1 = ttk.Frame(self.content_frame)
+        btn_frame_row1.pack(pady=10)
 
         # --- Pulsanti visibili SOLO al DM ---
         if self.current_user['role'] == 'DM':
-            ttk.Button(btn_frame, text="➕ Aggiungi Banca",
-                       command=self.add_bank_dialog).pack(side='left', padx=5)
+            ttk.Button(
+                btn_frame_row1,
+                text="➕ Aggiungi Banca",
+                command=self.add_bank_dialog
+            ).pack(side='left', padx=5)
 
-            ttk.Button(btn_frame, text="✏️ Modifica",
-                       command=self.edit_bank_dialog).pack(side='left', padx=5)
+            ttk.Button(
+                btn_frame_row1,
+                text="✏️ Modifica",
+                command=self.edit_bank_dialog
+            ).pack(side='left', padx=5)
 
-            ttk.Button(btn_frame, text="🗑️ Rimuovi",
-                       command=self.remove_bank_action).pack(side='left', padx=5)
+            ttk.Button(
+                btn_frame_row1,
+                text="🗑️ Rimuovi",
+                command=self.remove_bank_action
+            ).pack(side='left', padx=5)
 
         # --- Pulsanti visibili a tutti ---
-        ttk.Button(btn_frame, text="💰 Deposita",
-                   command=self.deposit_dialog).pack(side='left', padx=5)
+        ttk.Button(
+            btn_frame_row1,
+            text="💰 Deposita",
+            command=self.deposit_dialog
+        ).pack(side='left', padx=5)
 
-        ttk.Button(btn_frame, text="💸 Preleva",
-                   command=self.withdraw_dialog).pack(side='left', padx=5)
+        ttk.Button(
+            btn_frame_row1,
+            text="💸 Preleva",
+            command=self.withdraw_dialog
+        ).pack(side='left', padx=5)
 
-        ttk.Button(btn_frame, text="💱 Trasferisci Fondi",
-                   command=self.transfer_funds_dialog).pack(side='left', padx=5)
+        ttk.Button(
+            btn_frame_row1,
+            text="💱 Trasferisci Fondi",
+            command=self.transfer_funds_dialog
+        ).pack(side='left', padx=5)
 
-        ttk.Button(btn_frame, text="📜 Storico Operazioni",
-                   command=self.show_bank_history_dialog).pack(side='left', padx=5)
+        ttk.Button(
+            btn_frame_row1,
+            text="📦 Oggetti in Banca",
+            command=self.show_bank_items_dialog
+        ).pack(side='left', padx=5)
 
-        # --- Esporta Excel solo DM ---
+        ttk.Button(
+            btn_frame_row1,
+            text="📜 Storico Operazioni",
+            command=self.show_bank_history_dialog
+        ).pack(side='left', padx=5)
+
+        # SECONDA RIGA di pulsanti (solo per DM)
         if self.current_user['role'] == 'DM':
-            ttk.Button(btn_frame, text="📊 Esporta Excel",
-                       command=self.export_to_excel).pack(side='left', padx=5)
+            btn_frame_row2 = ttk.Frame(self.content_frame)
+            btn_frame_row2.pack(pady=(0, 10))  # Margine solo in basso
+            
+            ttk.Button(
+                btn_frame_row2,
+                text="📊 Esporta Excel",
+                command=self.export_to_excel
+            ).pack(side='left', padx=5)
 
+        # Lista banche
         self.show_banks_list()
     
     def show_banks_list(self):
@@ -1996,6 +2150,1172 @@ class DeDToolGUI:
 
         except Exception as e:
             self.append_time_log(f"Errore apply_annual_bank_interest: {e}")
+
+    def show_bank_items_dialog(self):
+        bank_id = None
+        pg_id = None
+
+        # CASO 1: banca selezionata da Treeview (DM)
+        if hasattr(self, "tree_banks") and self.tree_banks is not None:
+            sel = self.tree_banks.selection()
+            if sel:
+                bank_id = int(sel[0])  # iid = id banca
+                
+                # Recupera l'ID del PG associato alla banca
+                try:
+                    cursor = self.db.cursor()
+                    cursor.execute("SELECT pg_id FROM banks WHERE id = %s", (bank_id,))
+                    result = cursor.fetchone()
+                    if result and result['pg_id']:
+                        pg_id = result['pg_id']
+                    cursor.close()
+                except Exception as e:
+                    print(f"Errore nel recupero del PG associato alla banca: {e}")
+
+        # CASO 2: giocatore → banca già nota
+        if bank_id is None:
+            bank_id = getattr(self, "current_bank_id", None)
+
+        if bank_id is None:
+            messagebox.showwarning(
+                "Attenzione",
+                "Nessuna banca selezionata o disponibile."
+            )
+            return
+
+        # Se pg_id non è stato trovato, prova a recuperarlo da self.current_user
+        if pg_id is None and hasattr(self, 'current_user'):
+            try:
+                cursor = self.db.cursor()
+                # Cerca il primo PG dell'utente corrente
+                cursor.execute("SELECT id FROM player_characters WHERE user_id = %s LIMIT 1", 
+                             (self.current_user['id'],))
+                result = cursor.fetchone()
+                if result:
+                    pg_id = result['id']
+                cursor.close()
+            except Exception as e:
+                print(f"Errore nel recupero del PG dell'utente: {e}")
+
+        if pg_id is None:
+            messagebox.showwarning(
+                "Attenzione",
+                "Impossibile determinare il personaggio associato."
+            )
+            return
+
+        # salva contesto
+        self.current_bank_id = bank_id
+        self.current_pg_id = pg_id
+
+        win = tk.Toplevel(self.root)
+        win.title("📦 Oggetti in Banca")
+        
+        # MISURE DELLA FINESTRA:
+        win.geometry("1000x500")
+        
+        # Imposta dimensione minima
+        win.minsize(750, 450)
+        
+        # Imposta per rimanere sempre in primo piano
+        win.transient(self.root)  # Rende la finestra figlia della principale
+        win.grab_set()  # Blocca l'interazione con la finestra principale
+
+        notebook = ttk.Notebook(win)
+        notebook.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.build_bank_items_tab(notebook, bank_id, pg_id)
+        self.mark_bank_notifications_read(bank_id)
+
+    def get_pg_name(self, pg_id):
+        """Recupera il nome del PG dato l'ID"""
+        cursor = self.db.cursor()
+        cursor.execute("SELECT name FROM player_characters WHERE id = %s", (pg_id,))
+        result = cursor.fetchone()
+        cursor.close()
+        return result['name'] if result else "Sconosciuto"
+
+    def build_bank_items_tab(self, notebook, bank_id, pg_id):
+        frame = ttk.Frame(notebook)
+        notebook.add(frame, text="📦 Oggetti")
+
+        columns = ("id", "item", "qty", "declared", "status", "dm_proposal")
+        tree = ttk.Treeview(frame, columns=columns, show="headings")
+
+        tree.heading("item", text="Oggetto")
+        tree.heading("qty", text="Qtà")
+        tree.heading("declared", text="Prezzo giocatore (MO)")
+        tree.heading("status", text="Stato / Motivo rifiuto")
+        tree.heading("dm_proposal", text="Proposta DM (MO)")
+
+        # ALLARGA LE COLONNE
+        tree.column("id", width=0, stretch=False)
+        tree.column("item", width=200)  # Da 150 a 200
+        tree.column("qty", width=80)    # Da 60 a 80
+        tree.column("declared", width=180)  # Da 160 a 180
+        tree.column("status", width=300)  # Da 250 a 300
+        tree.column("dm_proposal", width=180)  # Da 150 a 180
+        
+        tree.pack(fill="both", expand=True, padx=5, pady=5)
+
+        self.bank_items_tree = tree
+        self.load_bank_items(bank_id, pg_id)
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill="x")
+
+        # Pulsanti per giocatore
+        if self.current_user['role'] == 'GIOCATORE':
+            ttk.Button(
+                btn_frame,
+                text="➕ Deposita oggetto",
+                command=lambda: self.open_deposit_item_dialog(bank_id, pg_id)
+            ).pack(side="left", padx=5)
+            
+            ttk.Button(
+                btn_frame,
+                text="↪️ Ritira oggetto",
+                command=self.withdraw_selected_item
+            ).pack(side="left", padx=5)
+            
+            ttk.Button(
+                btn_frame,
+                text="💰 Richiedi vendita",
+                command=self.request_sale_dialog
+            ).pack(side="left", padx=5)
+            
+            ttk.Button(
+                btn_frame,
+                text="💲 Modifica prezzo",
+                command=self.modify_price_dialog
+            ).pack(side="left", padx=5)
+
+        # Pulsanti per DM
+        if self.current_user['role'] == 'DM':
+            ttk.Button(
+                btn_frame,
+                text="💲 Propone prezzo",
+                command=self.dm_propose_price_dialog
+            ).pack(side="left", padx=5)
+            
+            ttk.Button(
+                btn_frame,
+                text="✅ Accetta prezzo giocatore",
+                command=self.dm_accept_player_price
+            ).pack(side="left", padx=5)
+            
+            ttk.Button(
+                btn_frame,
+                text="✅ Accetta prezzo DM",
+                command=self.dm_accept_dm_price
+            ).pack(side="left", padx=5)
+            
+            ttk.Button(
+                btn_frame,
+                text="❌ Rifiuta vendita",
+                command=self.dm_reject_sale
+            ).pack(side="left", padx=5)
+            
+            # NUOVO PULSANTE: Elimina oggetto venduto/ritirato
+            ttk.Button(
+                btn_frame,
+                text="🗑️ Elimina oggetto",
+                command=self.dm_delete_item
+            ).pack(side="left", padx=5)
+
+        # Bind per doppio click
+        tree.bind("<Double-1>", lambda e: self.show_item_details(tree))
+
+    def load_bank_items(self, bank_id, pg_id):
+        tree = self.bank_items_tree
+        tree.delete(*tree.get_children())
+
+        cursor = self.db.cursor()
+
+        if self.current_user['role'] == 'DM':
+            cursor.execute("""
+                SELECT bi.*, ev.value AS dm_proposal
+                FROM bank_items bi
+                LEFT JOIN (
+                    SELECT item_id, value 
+                    FROM bank_item_evaluations 
+                    WHERE evaluator_role = 'DM'
+                    ORDER BY created_at DESC
+                ) ev ON bi.id = ev.item_id
+                WHERE bi.bank_id = %s
+            """, (bank_id,))
+        else:
+            cursor.execute("""
+                SELECT bi.*, ev.value AS dm_proposal
+                FROM bank_items bi
+                LEFT JOIN (
+                    SELECT item_id, value 
+                    FROM bank_item_evaluations 
+                    WHERE evaluator_role = 'DM'
+                    ORDER BY created_at DESC
+                ) ev ON bi.id = ev.item_id
+                WHERE bi.bank_id = %s AND bi.pg_id = %s
+            """, (bank_id, pg_id))
+
+        for row in cursor.fetchall():
+            status = row["status"]
+            status_text = ""
+            
+            if status == "DEPOSITATO":
+                status_text = "Depositato"
+            elif status == "IN_VALUTAZIONE":
+                status_text = "In valutazione"
+            elif status == "VENDUTO":
+                status_text = "Venduto"
+            elif status == "RIFIUTATO":
+                status_text = "Rifiutato"
+            elif status == "RITIRATO":
+                status_text = "Ritirato"
+            else:
+                status_text = status
+            
+            # Ottieni l'ultima proposta del DM se esiste
+            dm_proposal_value = row.get("dm_proposal")
+            dm_proposal_text = f"{dm_proposal_value:.2f} MO" if dm_proposal_value else "—"
+            
+            # Se è RIFIUTATO, mostra il motivo
+            if status == "RIFIUTATO" and row.get("rejection_reason"):
+                status_text = f"Rifiutato: {row['rejection_reason']}"
+            
+            declared_value = row["declared_value"] or 0
+            
+            tree.insert("", "end", values=(
+                row["id"],
+                row["item_name"],
+                row["quantity"],
+                f"{declared_value:.2f} MO",
+                status_text,
+                dm_proposal_text
+            ))
+
+        cursor.close()
+
+    def open_deposit_item_dialog(self, bank_id, pg_id):
+        """Finestra per depositare un oggetto in banca - VERSIONE CORRETTA CON FOCUS"""
+        # Ottieni la finestra padre (quella degli oggetti in banca)
+        parent_window = self.bank_items_tree.winfo_toplevel()
+        
+        win = tk.Toplevel(parent_window)  # Specifica la finestra padre
+        win.title("Deposita oggetto in banca")
+        win.geometry("400x250")
+        
+        # ⭐⭐ AGGIUNGI QUESTE DUE RIGHE PER TENERE LA FINESTRA IN PRIMO PIANO
+        win.transient(parent_window)  # Rende la finestra figlia
+        win.grab_set()  # Blocca l'interazione con la finestra padre
+
+        tk.Label(win, text="Nome oggetto").grid(row=0, column=0, padx=5, pady=5, sticky='w')
+        tk.Label(win, text="Quantità").grid(row=1, column=0, padx=5, pady=5, sticky='w')
+        tk.Label(win, text="Valore stimato (MO)").grid(row=2, column=0, padx=5, pady=5, sticky='w')
+
+        name_e = tk.Entry(win, width=30)
+        qty_e = tk.Entry(win, width=10)
+        val_e = tk.Entry(win, width=15)
+        
+        name_e.grid(row=0, column=1, padx=5, pady=5)
+        qty_e.grid(row=1, column=1, padx=5, pady=5, sticky='w')
+        val_e.grid(row=2, column=1, padx=5, pady=5, sticky='w')
+        
+        # Focus sul primo campo
+        name_e.focus_set()
+
+        def submit():
+            try:
+                item_name = name_e.get().strip()
+                if not item_name:
+                    messagebox.showerror("Errore", "Inserisci il nome dell'oggetto")
+                    name_e.focus_set()
+                    return
+                    
+                quantity = int(qty_e.get())
+                if quantity <= 0:
+                    messagebox.showerror("Errore", "La quantità deve essere maggiore di 0")
+                    qty_e.focus_set()
+                    qty_e.select_range(0, tk.END)
+                    return
+                    
+                declared_value = float(val_e.get())
+                if declared_value < 0:
+                    messagebox.showerror("Errore", "Il valore non può essere negativo")
+                    val_e.focus_set()
+                    val_e.select_range(0, tk.END)
+                    return
+
+                abs_day = self.date_to_absolute_day(self.game_date)
+
+                cursor = self.db.cursor()
+                cursor.execute("""
+                    INSERT INTO bank_items
+                    (pg_id, bank_id, item_name, quantity, declared_value, 
+                     status, request_sale, absolute_day)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (pg_id, bank_id, item_name, quantity, declared_value, 
+                      "DEPOSITATO", 0, abs_day))
+
+                self.db.commit()
+                cursor.close()
+
+                self.append_time_log(
+                    f"{self.get_pg_name(pg_id)} deposita {quantity}x {item_name} in banca (valore: {declared_value:.2f} MO)."
+                )
+                
+                win.destroy()
+                self.load_bank_items(self.current_bank_id, self.current_pg_id)
+                messagebox.showinfo("Successo", f"Oggetto '{item_name}' depositato con successo!")
+                
+            except ValueError as e:
+                messagebox.showerror("Errore", f"Valore non valido: {e}")
+                # Ripristina il focus sul campo errato
+                if "quantity" in str(e).lower():
+                    qty_e.focus_set()
+                    qty_e.select_range(0, tk.END)
+                else:
+                    val_e.focus_set()
+                    val_e.select_range(0, tk.END)
+            except Exception as e:
+                messagebox.showerror("Errore", f"Errore nel deposito: {e}")
+
+        def on_closing():
+            win.destroy()
+            parent_window.focus_set()
+        
+        # Bind per Enter e Escape
+        win.bind('<Return>', lambda e: submit())
+        win.bind('<Escape>', lambda e: on_closing())
+        
+        # Pulsante centrato
+        btn_frame = tk.Frame(win)
+        btn_frame.grid(row=3, column=0, columnspan=2, pady=20)
+        
+        tk.Button(btn_frame, text="Deposita", command=submit).pack()
+        
+        # Bind per la chiusura della finestra
+        win.protocol("WM_DELETE_WINDOW", on_closing)
+
+    def withdraw_selected_item(self):
+        """Ritira l'oggetto selezionato dalla banca"""
+        sel = self.bank_items_tree.selection()
+        if not sel:
+            messagebox.showwarning("Attenzione", "Seleziona un oggetto da ritirare")
+            return
+
+        item_id = self.bank_items_tree.item(sel[0])["values"][0]
+        item_name = self.bank_items_tree.item(sel[0])["values"][1]
+        quantity = self.bank_items_tree.item(sel[0])["values"][2]
+        status = self.bank_items_tree.item(sel[0])["values"][4]
+
+        # Non permettere il ritiro se l'oggetto è già venduto
+        if status == "Venduto":
+            messagebox.showerror("Errore", "Questo oggetto è già stato venduto e non può essere ritirato")
+            return
+
+        if not messagebox.askyesno("Conferma ritiro", 
+                                  f"Vuoi davvero ritirare {quantity}x {item_name} dalla banca?\n"
+                                  f"L'oggetto verrà rimosso dall'inventario della banca."):
+            return
+
+        try:
+            cursor = self.db.cursor()
+            cursor.execute("""
+                UPDATE bank_items
+                SET status = 'RITIRATO', request_sale = 0
+                WHERE id = %s
+            """, (item_id,))
+            self.db.commit()
+            cursor.close()
+
+            self.append_time_log(
+                f"Oggetto {item_name} ritirato dalla banca."
+            )
+            
+            messagebox.showinfo("Successo", f"Oggetto '{item_name}' ritirato con successo!")
+            self.load_bank_items(self.current_bank_id, self.current_pg_id)
+            
+        except Exception as e:
+            messagebox.showerror("Errore", f"Errore durante il ritiro: {e}")
+
+    def request_sale_dialog(self):
+        """Richiede la vendita di un oggetto depositato"""
+        sel = self.bank_items_tree.selection()
+        if not sel:
+            messagebox.showwarning("Attenzione", "Seleziona un oggetto da mettere in vendita")
+            return
+
+        item_id = self.bank_items_tree.item(sel[0])["values"][0]
+        item_name = self.bank_items_tree.item(sel[0])["values"][1]
+        current_price = float(self.bank_items_tree.item(sel[0])["values"][3].replace(" MO", ""))
+        status = self.bank_items_tree.item(sel[0])["values"][4]
+
+        # Non permettere la vendita se l'oggetto è già stato venduto o ritirato
+        if status in ["Venduto", "Ritirato"]:
+            messagebox.showerror("Errore", "Questo oggetto non può essere messo in vendita")
+            return
+
+        # Ottieni la finestra padre (quella degli oggetti in banca)
+        parent_window = self.bank_items_tree.winfo_toplevel()
+        
+        win = tk.Toplevel(parent_window)  # Specifica la finestra padre
+        win.title("Richiedi vendita oggetto")
+        win.geometry("400x200")
+        
+        # ⭐⭐ AGGIUNGI QUESTE DUE RIGHE PER TENERE LA FINESTRA IN PRIMO PIANO
+        win.transient(parent_window)  # Rende la finestra figlia
+        win.grab_set()  # Blocca l'interazione con la finestra padre
+        
+        tk.Label(win, text=f"Oggetto: {item_name}").pack(pady=5)
+        tk.Label(win, text=f"Prezzo attuale: {current_price:.2f} MO").pack(pady=5)
+        
+        tk.Label(win, text="Nuovo prezzo di vendita (MO):").pack(pady=5)
+        price_entry = tk.Entry(win, width=15)
+        price_entry.insert(0, str(current_price))
+        price_entry.pack(pady=5)
+        
+        # Focus sul campo prezzo
+        price_entry.focus_set()
+
+        def submit():
+            try:
+                new_price = float(price_entry.get())
+                if new_price <= 0:
+                    messagebox.showerror("Errore", "Il prezzo deve essere maggiore di 0")
+                    return
+
+                cursor = self.db.cursor()
+                cursor.execute("""
+                    UPDATE bank_items
+                    SET declared_value = %s, status = 'IN_VALUTAZIONE', request_sale = 1
+                    WHERE id = %s
+                """, (new_price, item_id))
+                
+                # AGGIUNTA PER NOTIFICHE: segna che c'è una nuova notifica per il DM
+                cursor.execute("UPDATE bank_items SET dm_notified = FALSE WHERE id = %s", (item_id,))
+                
+                self.db.commit()
+                cursor.close()
+
+                self.append_time_log(
+                    f"Richiesta vendita per {item_name} a {new_price:.2f} MO."
+                )
+                
+                win.destroy()
+                self.load_bank_items(self.current_bank_id, self.current_pg_id)
+                messagebox.showinfo("Successo", f"Richiesta di vendita inviata al DM!")
+                
+            except ValueError:
+                messagebox.showerror("Errore", "Inserisci un prezzo valido")
+            except Exception as e:
+                messagebox.showerror("Errore", f"Errore nella richiesta: {e}")
+
+        def on_closing():
+            win.destroy()
+            parent_window.focus_set()
+        
+        # Bind per Enter e Escape
+        win.bind('<Return>', lambda e: submit())
+        win.bind('<Escape>', lambda e: on_closing())
+        
+        tk.Button(win, text="Invia richiesta", command=submit).pack(pady=15)
+        
+        # Bind per la chiusura della finestra
+        win.protocol("WM_DELETE_WINDOW", on_closing)
+
+    def modify_price_dialog(self):
+        """Modifica il prezzo di un oggetto in vendita"""
+        sel = self.bank_items_tree.selection()
+        if not sel:
+            messagebox.showwarning("Attenzione", "Seleziona un oggetto")
+            return
+
+        item_id = self.bank_items_tree.item(sel[0])["values"][0]
+        item_name = self.bank_items_tree.item(sel[0])["values"][1]
+        current_price = float(self.bank_items_tree.item(sel[0])["values"][3].replace(" MO", ""))
+        status = self.bank_items_tree.item(sel[0])["values"][4]
+
+        # Solo per oggetti in valutazione o depositati
+        if status not in ["In valutazione", "Depositato"]:
+            messagebox.showerror("Errore", "Puoi modificare il prezzo solo per oggetti depositati o in valutazione")
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("Modifica prezzo oggetto")
+        win.geometry("400x200")
+
+        tk.Label(win, text=f"Oggetto: {item_name}").pack(pady=5)
+        
+        tk.Label(win, text="Nuovo prezzo (MO):").pack(pady=5)
+        price_entry = tk.Entry(win, width=15)
+        price_entry.insert(0, str(current_price))
+        price_entry.pack(pady=5)
+
+        def submit():
+            try:
+                new_price = float(price_entry.get())
+                if new_price <= 0:
+                    messagebox.showerror("Errore", "Il prezzo deve essere maggiore di 0")
+                    return
+
+                cursor = self.db.cursor()
+                
+                # Se l'oggetto era in valutazione, rimuovi le vecchie valutazioni DM
+                if status == "In valutazione":
+                    cursor.execute("""
+                        DELETE FROM bank_item_evaluations 
+                        WHERE item_id = %s
+                    """, (item_id,))
+                
+                cursor.execute("""
+                    UPDATE bank_items
+                    SET declared_value = %s
+                    WHERE id = %s
+                """, (new_price, item_id))
+                
+                self.db.commit()
+                cursor.close()
+
+                self.append_time_log(
+                    f"Prezzo modificato per {item_name}: {new_price:.2f} MO."
+                )
+                
+                win.destroy()
+                self.load_bank_items(self.current_bank_id, self.current_pg_id)
+                messagebox.showinfo("Successo", f"Prezzo aggiornato a {new_price:.2f} MO")
+                
+            except ValueError:
+                messagebox.showerror("Errore", "Inserisci un prezzo valido")
+            except Exception as e:
+                messagebox.showerror("Errore", f"Errore nella modifica: {e}")
+
+        tk.Button(win, text="Modifica prezzo", command=submit).pack(pady=15)
+
+    def dm_delete_item(self):
+        """DM elimina un oggetto venduto o ritirato dal database"""
+        sel = self.bank_items_tree.selection()
+        if not sel:
+            messagebox.showwarning("Attenzione", "Seleziona un oggetto da eliminare")
+            return
+
+        item_id = self.bank_items_tree.item(sel[0])["values"][0]
+        item_name = self.bank_items_tree.item(sel[0])["values"][1]
+        status_text = self.bank_items_tree.item(sel[0])["values"][4]
+        
+        # Determina lo stato effettivo dal testo visualizzato
+        status = "UNKNOWN"
+        if "Depositato" in status_text:
+            status = "DEPOSITATO"
+        elif "In valutazione" in status_text:
+            status = "IN_VALUTAZIONE"
+        elif "Venduto" in status_text:
+            status = "VENDUTO"
+        elif "Rifiutato" in status_text:
+            status = "RIFIUTATO"
+        elif "Ritirato" in status_text:
+            status = "RITIRATO"
+        
+        # Permetti eliminazione solo per oggetti VENDUTI o RITIRATI
+        if status not in ["VENDUTO", "RITIRATO"]:
+            messagebox.showwarning("Attenzione", 
+                                  f"Puoi eliminare solo oggetti VENDUTI o RITIRATI.\n"
+                                  f"Stato attuale: {status_text}")
+            return
+        
+        # Ottieni la finestra Toplevel padre
+        parent_window = self.bank_items_tree.winfo_toplevel()
+        
+        # Crea una messagebox personalizzata che mantiene il focus
+        confirm = tk.messagebox.askyesno(
+            "Conferma eliminazione",
+            f"Sei sicuro di voler ELIMINARE PERMANENTEMENTE "
+            f"l'oggetto '{item_name}'?\n\n"
+            f"Questa azione non può essere annullata!\n"
+            f"Verranno eliminati anche tutti i dati correlati.",
+            parent=parent_window  # Specifica la finestra padre
+        )
+        
+        if not confirm:
+            return
+        
+        try:
+            cursor = self.db.cursor()
+            
+            # Prima elimina le valutazioni correlate (se presenti)
+            cursor.execute("DELETE FROM bank_item_evaluations WHERE item_id = %s", (item_id,))
+            
+            # Poi elimina l'oggetto stesso
+            cursor.execute("DELETE FROM bank_items WHERE id = %s", (item_id,))
+            
+            self.db.commit()
+            cursor.close()
+
+            self.append_time_log(
+                f"Oggetto eliminato: {item_name} (ID: {item_id})"
+            )
+            
+            # Messagebox di conferma che mantiene il focus
+            tk.messagebox.showinfo(
+                "Eliminato", 
+                f"Oggetto '{item_name}' eliminato permanentemente.",
+                parent=parent_window  # Specifica la finestra padre
+            )
+            
+            self.load_bank_items(self.current_bank_id, self.current_pg_id)
+            
+        except Exception as e:
+            tk.messagebox.showerror(
+                "Errore", 
+                f"Errore durante l'eliminazione: {e}",
+                parent=parent_window  # Specifica la finestra padre
+            )
+
+    def dm_propose_price_dialog(self):
+        """DM propone un prezzo alternativo per un oggetto in valutazione"""
+        sel = self.bank_items_tree.selection()
+        if not sel:
+            messagebox.showwarning("Attenzione", "Seleziona un oggetto in valutazione")
+            return
+
+        item_id = self.bank_items_tree.item(sel[0])["values"][0]
+        item_name = self.bank_items_tree.item(sel[0])["values"][1]
+        player_price = float(self.bank_items_tree.item(sel[0])["values"][3].replace(" MO", ""))
+        status = self.bank_items_tree.item(sel[0])["values"][4]
+        
+        if status != "In valutazione":
+            messagebox.showwarning("Attenzione", "Puoi proporre un prezzo solo per oggetti in valutazione")
+            return
+
+        # Ottieni la finestra padre (quella degli oggetti in banca)
+        parent_window = self.bank_items_tree.winfo_toplevel()
+        
+        win = tk.Toplevel(parent_window)  # Specifica la finestra padre
+        win.title("Propone prezzo banca")
+        win.geometry("400x250")
+        
+        # ⭐⭐ AGGIUNGI QUESTE DUE RIGHE PER TENERE LA FINESTRA IN PRIMO PIANO
+        win.transient(parent_window)  # Rende la finestra figlia
+        win.grab_set()  # Blocca l'interazione con la finestra padre
+
+        tk.Label(win, text=f"Oggetto: {item_name}").pack(pady=5)
+        tk.Label(win, text=f"Prezzo richiesto dal giocatore: {player_price:.2f} MO").pack(pady=5)
+        
+        tk.Label(win, text="Prezzo proposto dalla banca (MO):").pack(pady=5)
+        price_entry = tk.Entry(win, width=15)
+        price_entry.insert(0, str(player_price * 0.8))  # Offerta iniziale: 80% del prezzo giocatore
+        price_entry.pack(pady=5)
+        
+        # Focus sul campo prezzo
+        price_entry.focus_set()
+        price_entry.select_range(0, tk.END)  # Seleziona tutto il testo
+
+        def submit():
+            try:
+                proposed_price = float(price_entry.get())
+                if proposed_price <= 0:
+                    messagebox.showerror("Errore", "Il prezzo deve essere maggiore di 0")
+                    return
+
+                cursor = self.db.cursor()
+                
+                # Registra la proposta del DM
+                cursor.execute("""
+                    INSERT INTO bank_item_evaluations 
+                    (item_id, evaluator_role, value, created_at)
+                    VALUES (%s, %s, %s, NOW())
+                """, (item_id, 'DM', proposed_price))
+                
+                # AGGIUNTA PER NOTIFICHE: segna che c'è una nuova notifica per il giocatore
+                cursor.execute("UPDATE bank_items SET player_notified = FALSE WHERE id = %s", (item_id,))
+                
+                self.db.commit()
+                cursor.close()
+
+                self.append_time_log(
+                    f"Banca propone {proposed_price:.2f} MO per {item_name} (giocatore chiede {player_price:.2f} MO)."
+                )
+                
+                win.destroy()
+                self.load_bank_items(self.current_bank_id, self.current_pg_id)
+                messagebox.showinfo("Successo", f"Prezzo proposto: {proposed_price:.2f} MO")
+                
+            except ValueError:
+                messagebox.showerror("Errore", "Inserisci un prezzo valido")
+            except Exception as e:
+                messagebox.showerror("Errore", f"Errore nella proposta: {e}")
+
+        def on_closing():
+            win.destroy()
+            parent_window.focus_set()
+        
+        # Bind per Enter e Escape
+        win.bind('<Return>', lambda e: submit())
+        win.bind('<Escape>', lambda e: on_closing())
+        
+        # Pulsante centrato
+        btn_frame = ttk.Frame(win)
+        btn_frame.pack(pady=10)
+        
+        ttk.Button(btn_frame, text="Propone prezzo", command=submit).pack()
+        
+        # Bind per la chiusura della finestra
+        win.protocol("WM_DELETE_WINDOW", on_closing)
+
+    def dm_accept_player_price(self):
+        """DM accetta il prezzo proposto dal giocatore"""
+        sel = self.bank_items_tree.selection()
+        if not sel:
+            messagebox.showwarning("Attenzione", "Seleziona un oggetto in valutazione")
+            return
+
+        item_id = self.bank_items_tree.item(sel[0])["values"][0]
+        item_name = self.bank_items_tree.item(sel[0])["values"][1]
+        quantity = self.bank_items_tree.item(sel[0])["values"][2]
+        sale_price = float(self.bank_items_tree.item(sel[0])["values"][3].replace(" MO", ""))
+        status = self.bank_items_tree.item(sel[0])["values"][4]
+        
+        if status != "In valutazione":
+            messagebox.showwarning("Attenzione", "Puoi accettare solo oggetti in valutazione")
+            return
+
+        if not messagebox.askyesno("Conferma vendita",
+                                  f"Accettare la vendita di {quantity}x {item_name} "
+                                  f"per {sale_price:.2f} MO (prezzo del giocatore)?\n"
+                                  f"Il denaro verrà accreditato sul conto bancario."):
+            return
+
+        try:
+            cursor = self.db.cursor()
+            
+            # Ottieni bank_id per accreditare il denaro
+            cursor.execute("SELECT bank_id FROM bank_items WHERE id = %s", (item_id,))
+            result = cursor.fetchone()
+            bank_id = result['bank_id']
+            
+            # Accredita il denaro
+            cursor.execute("""
+                UPDATE banks
+                SET current_balance = current_balance + %s
+                WHERE id = %s
+            """, (sale_price, bank_id))
+            
+            # Aggiorna lo stato dell'oggetto
+            cursor.execute("""
+                UPDATE bank_items
+                SET status = 'VENDUTO', evaluated_value = %s, request_sale = 0
+                WHERE id = %s
+            """, (sale_price, item_id))
+            
+            self.db.commit()
+            cursor.close()
+
+            self.append_time_log(
+                f"Vendita accettata al prezzo del giocatore: {quantity}x {item_name} venduto per {sale_price:.2f} MO."
+            )
+            
+            messagebox.showinfo("Successo", f"Vendita completata! {sale_price:.2f} MO accreditati.")
+            self.load_bank_items(self.current_bank_id, self.current_pg_id)
+            
+        except Exception as e:
+            messagebox.showerror("Errore", f"Errore nell'accettare la vendita: {e}")
+
+    def dm_accept_dm_price(self):
+        """DM accetta la propria proposta di prezzo"""
+        sel = self.bank_items_tree.selection()
+        if not sel:
+            messagebox.showwarning("Attenzione", "Seleziona un oggetto in valutazione")
+            return
+
+        item_id = self.bank_items_tree.item(sel[0])["values"][0]
+        item_name = self.bank_items_tree.item(sel[0])["values"][1]
+        quantity = self.bank_items_tree.item(sel[0])["values"][2]
+        dm_price_text = self.bank_items_tree.item(sel[0])["values"][5]
+        status = self.bank_items_tree.item(sel[0])["values"][4]
+        
+        if status != "In valutazione":
+            messagebox.showwarning("Attenzione", "Puoi accettare solo oggetti in valutazione")
+            return
+        
+        if dm_price_text == "—":
+            messagebox.showwarning("Attenzione", "Prima propone un prezzo come DM")
+            return
+            
+        dm_price = float(dm_price_text.replace(" MO", ""))
+
+        if not messagebox.askyesno("Conferma vendita",
+                                  f"Accettare la vendita di {quantity}x {item_name} "
+                                  f"per {dm_price:.2f} MO (prezzo della banca)?\n"
+                                  f"Il denaro verrà accreditato sul conto bancario."):
+            return
+
+        try:
+            cursor = self.db.cursor()
+            
+            # Ottieni bank_id per accreditare il denaro
+            cursor.execute("SELECT bank_id FROM bank_items WHERE id = %s", (item_id,))
+            result = cursor.fetchone()
+            bank_id = result['bank_id']
+            
+            # Accredita il denaro
+            cursor.execute("""
+                UPDATE banks
+                SET current_balance = current_balance + %s
+                WHERE id = %s
+            """, (dm_price, bank_id))
+            
+            # Aggiorna lo stato dell'oggetto
+            cursor.execute("""
+                UPDATE bank_items
+                SET status = 'VENDUTO', evaluated_value = %s, request_sale = 0
+                WHERE id = %s
+            """, (dm_price, item_id))
+            
+            self.db.commit()
+            cursor.close()
+
+            self.append_time_log(
+                f"Vendita accettata al prezzo della banca: {quantity}x {item_name} venduto per {dm_price:.2f} MO."
+            )
+            
+            messagebox.showinfo("Successo", f"Vendita completata! {dm_price:.2f} MO accreditati.")
+            self.load_bank_items(self.current_bank_id, self.current_pg_id)
+            
+        except Exception as e:
+            messagebox.showerror("Errore", f"Errore nell'accettare la vendita: {e}")
+
+    def dm_reject_sale(self):
+        """DM rifiuta la vendita e imposta lo stato a RIFIUTATO"""
+        sel = self.bank_items_tree.selection()
+        if not sel:
+            messagebox.showwarning("Attenzione", "Seleziona un oggetto")
+            return
+
+        item_id = self.bank_items_tree.item(sel[0])["values"][0]
+        item_name = self.bank_items_tree.item(sel[0])["values"][1]
+        status = self.bank_items_tree.item(sel[0])["values"][4]
+
+        if status != "In valutazione":
+            messagebox.showwarning("Attenzione", "Puoi rifiutare solo oggetti in valutazione")
+            return
+
+        reason = tk.simpledialog.askstring("Motivo rifiuto",
+                                          f"Motivo del rifiuto per {item_name}:",
+                                          parent=self.root)
+        
+        if reason is None:  # L'utente ha cliccato Cancel
+            return
+
+        try:
+            cursor = self.db.cursor()
+            
+            # Rimuovi eventuali valutazioni DM
+            cursor.execute("""
+                DELETE FROM bank_item_evaluations 
+                WHERE item_id = %s
+            """, (item_id,))
+            
+            # Imposta lo stato a RIFIUTATO e salva il motivo
+            cursor.execute("""
+                UPDATE bank_items
+                SET status = 'RIFIUTATO', request_sale = 0, rejection_reason = %s
+                WHERE id = %s
+            """, (reason, item_id))
+
+            cursor.execute("UPDATE bank_items SET player_notified = FALSE WHERE id = %s", (item_id,))
+
+            self.db.commit()
+            cursor.close()
+
+            self.append_time_log(
+                f"Vendita rifiutata per {item_name}. Motivo: {reason}"
+            )
+            
+            messagebox.showinfo("Rifiutato", f"Vendita rifiutata. Oggetto marcato come 'Rifiutato'.")
+            self.load_bank_items(self.current_bank_id, self.current_pg_id)
+            
+        except Exception as e:
+            messagebox.showerror("Errore", f"Errore nel rifiutare la vendita: {e}")
+
+    def show_item_details(self, tree):
+        """Mostra dettagli completi dell'oggetto selezionato"""
+        sel = tree.selection()
+        if not sel:
+            return
+        
+        item_id = tree.item(sel[0])["values"][0]
+        
+        cursor = self.db.cursor()
+        cursor.execute("""
+            SELECT bi.*, ev.value AS dm_proposal, ev.created_at AS proposal_date
+            FROM bank_items bi
+            LEFT JOIN (
+                SELECT item_id, value, created_at 
+                FROM bank_item_evaluations 
+                WHERE evaluator_role = 'DM'
+                ORDER BY created_at DESC
+                LIMIT 1
+            ) ev ON bi.id = ev.item_id
+            WHERE bi.id = %s
+        """, (item_id,))
+        
+        item = cursor.fetchone()
+        cursor.close()
+        
+        if not item:
+            return
+        
+        # Ottieni la finestra padre (quella degli oggetti in banca)
+        parent_window = tree.winfo_toplevel()
+        
+        win = tk.Toplevel(parent_window)  # Specifica esplicitamente la finestra padre
+        win.title(f"Dettagli oggetto: {item['item_name']}")
+        win.geometry("500x450")
+        
+        # Rendi questa finestra modale rispetto alla sua padre
+        win.transient(parent_window)
+        
+        # NON USARE grab_set() per questa finestra secondaria
+        # Invece, imposta il focus e rendila modale in modo più leggero
+        win.focus_set()
+        
+        # Mostra tutti i dettagli in un Text widget
+        text = tk.Text(win, wrap="word", height=20, width=60)
+        text.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        details = f"""OGGETTO: {item['item_name']}
+    Quantità: {item['quantity']}
+    Valore stimato: {item['declared_value'] or 0:.2f} MO
+    Stato: {item['status']}
+    """
+        
+        if item['status'] == 'RIFIUTATO' and item.get('rejection_reason'):
+            details += f"Motivo rifiuto: {item['rejection_reason']}\n"
+        
+        if item['dm_proposal']:
+            details += f"Proposta DM: {item['dm_proposal']:.2f} MO\n"
+            if item['proposal_date']:
+                try:
+                    proposal_date = item['proposal_date']
+                    mystara_date = self.convert_date_to_ded_format(proposal_date)
+                    details += f"Data proposta: {mystara_date}\n"
+                except Exception as e:
+                    proposal_str = proposal_date.strftime("%Y-%m-%d %H:%M") if hasattr(proposal_date, 'strftime') else str(proposal_date)
+                    details += f"Data proposta: {proposal_str}\n"
+        
+        if item['evaluated_value']:
+            details += f"Valore finale vendita: {item['evaluated_value']:.2f} MO\n"
+        
+        try:
+            abs_day = item['absolute_day']
+            if abs_day is not None:
+                date_from_abs = self.absolute_day_to_date(abs_day)
+                mystara_deposit_date = self.convert_date_to_ded_format(date_from_abs)
+                details += f"\nData deposito: {mystara_deposit_date}"
+            else:
+                details += f"\nData deposito: N/A"
+        except Exception as e:
+            details += f"\nData deposito: Errore conversione"
+        
+        text.insert("1.0", details)
+        text.config(state="disabled")
+        
+        # Pulsante Chiudi con gestione corretta
+        def close_window():
+            win.destroy()
+            # Ripristina il focus sulla finestra padre
+            parent_window.focus_set()
+        
+        tk.Button(win, text="Chiudi", command=close_window).pack(pady=10)
+        
+        # Bind per chiudere con ESC
+        win.bind('<Escape>', lambda e: close_window())
+        
+        # Bind per chiudere cliccando fuori (solo se non in modalità grab)
+        def on_focus_out(event):
+            if event.widget == win:
+                # Permetti di chiudere cliccando fuori
+                close_window()
+        
+        win.bind('<FocusOut>', on_focus_out)
+
+    def show_all_sale_requests(self):
+        """Mostra tutte le richieste di vendita per il DM (versione semplice)"""
+        cursor = self.db.cursor()
+        cursor.execute("""
+            SELECT bi.*, pc.name as pg_name, b.name as bank_name, b.id as bank_id
+            FROM bank_items bi
+            JOIN player_characters pc ON bi.pg_id = pc.id
+            JOIN banks b ON bi.bank_id = b.id
+            WHERE bi.status = 'IN_VALUTAZIONE'
+            ORDER BY bi.id DESC
+        """)
+        
+        items = cursor.fetchall()
+        cursor.close()
+        
+        if not items:
+            messagebox.showinfo("Nessuna richiesta", "Non ci sono richieste di vendita in attesa.")
+            return
+        
+        # Finestra semplice con lista
+        win = tk.Toplevel(self.root)
+        win.title("📋 Richieste di Vendita")
+        win.geometry("500x400")
+        
+        ttk.Label(win, text=f"Hai {len(items)} richiesta(e) di vendita:", 
+                 font=('Arial', 11, 'bold')).pack(pady=10)
+        
+        # Frame scrollabile
+        frame = ttk.Frame(win)
+        frame.pack(fill='both', expand=True, padx=10, pady=5)
+        
+        canvas = tk.Canvas(frame)
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        for item in items:
+            item_frame = ttk.Frame(scrollable_frame, relief='groove', borderwidth=1)
+            item_frame.pack(fill='x', pady=2, padx=5)
+            
+            # Mostra tutte le informazioni, incluso il nome della banca
+            info = f"• {item['item_name']} (x{item['quantity']}) - PG: {item['pg_name']}"
+            info += f" - Banca: {item['bank_name']} - Prezzo: {item['declared_value']:.2f} MO"
+            
+            ttk.Label(item_frame, text=info, font=('Arial', 9)).pack(side='left', padx=5, pady=3)
+            
+            # Pulsante con nome banca
+            ttk.Button(item_frame, text=f"Vai a {item['bank_name']}",
+                      command=lambda b=item['bank_id'], bn=item['bank_name']: self.open_bank_and_close(b, bn, win),
+                      width=20).pack(side='right', padx=5)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        ttk.Button(win, text="Chiudi", command=win.destroy).pack(pady=10)
+
+    def open_bank_and_close(self, bank_id, bank_name, parent_window):
+        """Apre la banca specifica e chiude la finestra delle richieste"""
+        parent_window.destroy()
+        self.show_banks_menu()
+        messagebox.showinfo("Info", 
+                           f"Vai al menu Banche e seleziona la banca:\n"
+                           f"'{bank_name}' (ID: {bank_id})\n\n"
+                           f"Poi clicca su 'Oggetti in Banca' per gestire la richiesta.")
+
+    def show_player_notifications_simple(self):
+        """Mostra notifiche giocatore (versione semplice)"""
+        cursor = self.db.cursor()
+        cursor.execute("""
+            SELECT bi.*, b.name as bank_name, ev.value as dm_proposal
+            FROM bank_items bi
+            JOIN banks b ON bi.bank_id = b.id
+            LEFT JOIN (
+                SELECT item_id, value 
+                FROM bank_item_evaluations 
+                WHERE evaluator_role = 'DM'
+                ORDER BY created_at DESC
+                LIMIT 1
+            ) ev ON bi.id = ev.item_id
+            WHERE bi.pg_id IN (
+                SELECT id FROM player_characters WHERE user_id = %s
+            )
+            AND (
+                (bi.status = 'RIFIUTATO' AND bi.player_notified = FALSE) OR
+                (bi.status = 'IN_VALUTAZIONE' AND ev.value IS NOT NULL AND bi.player_notified = FALSE)
+            )
+            ORDER BY bi.id DESC
+        """, (self.current_user['id'],))
+        
+        items = cursor.fetchall()
+        cursor.close()
+        
+        if not items:
+            messagebox.showinfo("Nessuna notifica", "Non hai notifiche non lette.")
+            return
+        
+        # Finestra semplice con lista
+        win = tk.Toplevel(self.root)
+        win.title("📬 Le tue notifiche")
+        win.geometry("400x500")
+        
+        ttk.Label(win, text=f"Hai {len(items)} notifica(e):", 
+                 font=('Arial', 11, 'bold')).pack(pady=10)
+        
+        # Frame scrollabile
+        frame = ttk.Frame(win)
+        frame.pack(fill='both', expand=True, padx=10, pady=5)
+        
+        canvas = tk.Canvas(frame)
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        for item in items:
+            item_frame = ttk.Frame(scrollable_frame, relief='groove', borderwidth=1)
+            item_frame.pack(fill='x', pady=2, padx=5)
+            
+            if item['dm_proposal']:
+                message = f"⭐ OFFERTA: {item['item_name']} - La banca offre {item['dm_proposal']:.2f} MO"
+                color = 'green'
+            else:
+                reason = item.get('rejection_reason', 'Vendita rifiutata')
+                message = f"⚠️ RIFIUTO: {item['item_name']} - {reason[:50]}{'...' if len(reason) > 50 else ''}"
+                color = 'red'
+            
+            ttk.Label(item_frame, text=message, 
+                     font=('Arial', 9),
+                     foreground=color).pack(padx=5, pady=3)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Segna come lette
+        def mark_as_read():
+            for item in items:
+                cursor = self.db.cursor()
+                cursor.execute("UPDATE bank_items SET player_notified = TRUE WHERE id = %s", 
+                              (item['id'],))
+                self.db.commit()
+                cursor.close()
+            
+            win.destroy()
+            messagebox.showinfo("Lette", "Tutte le notifiche segnate come lette!")
+            # Ricarica la schermata principale per rimuovere il banner
+            self.show_main_menu()
+        
+        ttk.Button(win, text="Segna tutte come lette", command=mark_as_read).pack(pady=10)
+        ttk.Button(win, text="Chiudi", command=win.destroy).pack(pady=5)
+
+    def mark_bank_notifications_read(self, bank_id):
+        """Segna le notifiche come lette quando l'utente accede alla banca"""
+        cursor = self.db.cursor()
+        
+        if self.current_user['role'] == 'DM':
+            # Per DM: segna tutte le notifiche di questa banca
+            cursor.execute("""
+                UPDATE bank_items 
+                SET dm_notified = TRUE 
+                WHERE bank_id = %s AND status = 'IN_VALUTAZIONE'
+            """, (bank_id,))
+        else:
+            # Per giocatore: segna le sue notifiche in questa banca
+            cursor.execute("""
+                UPDATE bank_items 
+                SET player_notified = TRUE 
+                WHERE bank_id = %s AND pg_id IN (
+                    SELECT id FROM player_characters WHERE user_id = %s
+                )
+            """, (bank_id, self.current_user['id']))
+        
+        self.db.commit()
+        cursor.close()
 
     def show_followers_menu(self):
         """Mostra il menu seguaci, obiettivi e imprevisti"""
@@ -2941,7 +4261,17 @@ class DeDToolGUI:
             info_frame.pack(fill='x', pady=10)
             
             status_name = self.OBJECTIVE_STATUS_REV.get(objective.get('status'), 'Sconosciuto')
-            start_date = objective.get('start_date', 'Non iniziato')
+            start_date_raw = objective.get('start_date')
+
+            if start_date_raw:
+                try:
+                    if isinstance(start_date_raw, datetime):
+                        start_date_raw = start_date_raw.date()
+                    start_date = self.convert_date_to_ded_format(start_date_raw)
+                except Exception:
+                    start_date = str(start_date_raw)
+            else:
+                start_date = "Non iniziato"
             
             info_text = f"""Seguace: {objective.get('follower_name', 'N/A')}
     PG Proprietario: {objective.get('pg_name', 'N/A')}
@@ -5211,16 +6541,39 @@ class DeDToolGUI:
         """
         Controlla il cambio di ANNO Mystara (non l'anno gregoriano).
         Se l'anno Mystara cambia chiama apply_annual_bank_interest().
+        Usa il calcolo anno coerente con absolute_day ed EPOCH_DATE.
         """
         try:
-            old_y = self._get_mystara_year_from_date(old_date)
-            new_y = self._get_mystara_year_from_date(new_date)
+            # validazione input
+            if not old_date or not new_date:
+                return
+
+            # normalizza date
+            if isinstance(old_date, datetime):
+                old_date = old_date.date()
+            if isinstance(new_date, datetime):
+                new_date = new_date.date()
+
+            # calcolo anni Mystara in modo coerente
+            old_abs = self.date_to_absolute_day(old_date)
+            new_abs = self.date_to_absolute_day(new_date)
+
+            base_year = getattr(self, "EPOCH_DATE", date(1, 1, 1)).year
+            old_y = base_year + (old_abs // self.DAYS_PER_YEAR)
+            new_y = base_year + (new_abs // self.DAYS_PER_YEAR)
+
+            # confronto
             if new_y != old_y:
-                self.append_time_log(f"🔄 Cambio anno Mystara rilevato: {old_y} → {new_y}")
+                self.append_time_log(
+                    f"🔄 Cambio anno Mystara rilevato: {old_y} → {new_y}"
+                )
                 try:
                     self.apply_annual_bank_interest()
                 except Exception as e:
-                    self.append_time_log(f"Errore apply_annual_bank_interest: {e}")
+                    self.append_time_log(
+                        f"Errore apply_annual_bank_interest: {e}"
+                    )
+
         except Exception as e:
             self.append_time_log(f"Errore _check_year_change: {e}")
 
@@ -5723,12 +7076,15 @@ class DeDToolGUI:
 
             # ricarica lista imprevisti pendenti in GUI
             try:
-                self.load_events_list(self.tree_imprevisti)
-            except:
-                try:
+                if hasattr(self, "tree_imprevisti") and self.tree_imprevisti is not None:
+                    if self.tree_imprevisti.winfo_exists():
+                        self.load_events_list(self.tree_imprevisti)
+                    else:
+                        self.load_pending_events()
+                else:
                     self.load_pending_events()
-                except:
-                    pass
+            except Exception as e:
+                self.append_time_log(f"Errore aggiornamento imprevisti GUI: {e}")
 
         except Exception as e:
             self.append_time_log(f"Errore in apply_unhandled_objective_events: {e}")
@@ -5905,15 +7261,14 @@ class DeDToolGUI:
 
     Funzionalità:
     • Gestione Personaggi
-    • Sistema Bancario
-    • Seguaci e Obiettivi
+    • Sistema Bancario con desposito Oggetti
+    • Seguaci, Obiettivi, Imprevisti
     • Attività Economiche
     • Spese Fisse
     • Sistema Chat
-    • Backup Database
-    • Export Excel
+    • Diario Campagna    
 
-    Database: MariaDB
+    Database: SQL MariaDB
     Interfaccia: Tkinter/Python
         """
         
@@ -5924,66 +7279,6 @@ class DeDToolGUI:
         """Attiva/disattiva schermo intero"""
         current_state = self.root.attributes('-fullscreen')
         self.root.attributes('-fullscreen', not current_state)
-
-    def on_closing(self):
-        """Gestisce la chiusura dell'applicazione"""
-        try:
-            print("Chiusura applicazione in corso...")
-            
-            # 1. Chiudi tutte le finestre chat aperte e ferma polling
-            self._close_all_chat_windows()
-            
-            # 2. Ferma eventuali altri polling (come la chat comune nei tab)
-            if hasattr(self, 'content_frame'):
-                for widget in self.content_frame.winfo_children():
-                    if hasattr(widget, 'after_id'):
-                        try:
-                            widget.after_cancel(widget.after_id)
-                        except:
-                            pass
-            
-            # 3. Chiudi connessioni database
-            if hasattr(self, 'db') and self.db:
-                self.db.close()
-                print("✓ Connessione database chiusa")
-            
-            # 4. Chiudi connection pool
-            if hasattr(self, '_pool_initialized') and self._pool_initialized:
-                if self.connection_pool:
-                    try:
-                        self.connection_pool.close()
-                        print("✓ Connection pool chiuso")
-                    except:
-                        pass
-            
-            # 5. Distruggi la finestra principale
-            self.root.quit()
-            self.root.destroy()
-            
-        except Exception as e:
-            print(f"Errore durante la chiusura: {e}")
-            self.root.destroy()
-
-    def setup_menu_bar(self):
-        """Crea la barra dei menu"""
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
-        
-        file_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="File", menu=file_menu)
-        
-        file_menu.add_separator()
-        file_menu.add_command(label="🚪 Logout", command=self.show_login_screen)
-        file_menu.add_command(label="❌ Esci", command=self.on_closing)
-        
-        view_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Visualizza", menu=view_menu)
-        view_menu.add_command(label="🖥️ Schermo Intero", command=self.toggle_fullscreen)
-        
-        help_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Aiuto", menu=help_menu)
-        help_menu.add_command(label="ℹ️ Informazioni", command=self.show_about)
-        help_menu.add_command(label="📘 Scarica Diario", command=self.download_diary)
 
     def init_connection_pool(self):
         with self._pool_lock:
@@ -6145,7 +7440,7 @@ class DeDToolGUI:
 
             self.update_chat_button_fast()
 
-            # 🔥 AGGIUNGI: Refresh forzato quando si torna al tab Chat Comune
+            # 🔥 MODIFICA: Refresh forzato quando si torna al tab Chat Comune
             if "Chat Comune" in tab_name:
                 try:
                     # Trova il widget messages_text all'interno del frame
@@ -6157,12 +7452,8 @@ class DeDToolGUI:
                                     chat_key = f"comune_{self.current_user['id']}"
                                     self._last_chat_message_id[chat_key] = 0
                                     
-                                    # Chiama la funzione di inizializzazione
-                                    if hasattr(comune_frame, 'initialize_chat'):
-                                        comune_frame.initialize_chat()
-                                    else:
-                                        # Se non esiste, ricrea l'interfaccia
-                                        self.create_chat_interface_fast(comune_frame, chat_type='comune')
+                                    # 🔥 MODIFICA: Usa la nuova funzione
+                                    self._load_common_messages_display(subwidget, chat_key)
                                     break
                 except Exception as e:
                     print(f"Errore refresh chat comune: {e}")
@@ -6193,53 +7484,21 @@ class DeDToolGUI:
         
         return notebook
 
-    # 🔥 AGGIUNGI: Nuovo metodo helper per inizializzare la chat comune
     def _initialize_chat_common(self, comune_frame):
         """Inizializza la chat comune dopo un breve ritardo"""
         try:
-            # Resetta last_id per forzare il caricamento completo
-            chat_key = f"comune_{self.current_user['id']}"
-            self._last_chat_message_id[chat_key] = 0
-            
-            # Cerca il widget messages_text e forza il caricamento
+            # Cerca il widget messages_text
             for widget in comune_frame.winfo_children():
                 if isinstance(widget, ttk.Frame):
                     for subwidget in widget.winfo_children():
                         if isinstance(subwidget, scrolledtext.ScrolledText):
-                            # Chiama la funzione di caricamento
-                            self.load_chat_messages_fast(subwidget, 'comune')
-                            
-                            # 🔥 Aggiungi anche marcatura come letti dopo 3 secondi
-                            # Cerca i messaggi non letti e marcali
-                            conn, cursor = self.safe_cursor()
-                            cursor.execute("""
-                                SELECT c.id
-                                FROM chat_messages c
-                                LEFT JOIN chat_reads r ON c.id = r.message_id AND r.user_id = %s
-                                WHERE r.id IS NULL
-                                  AND c.receiver_id IS NULL
-                                  AND c.is_secret = 0
-                                  AND c.sender_id != %s
-                            """, (self.current_user['id'], self.current_user['id']))
-                            
-                            unread_ids = [row['id'] for row in cursor.fetchall()]
-                            cursor.close()
-                            
-                            if unread_ids:
-                                # Marca come letti dopo 3 secondi
-                                comune_frame.after(3000, lambda ids=unread_ids, widget=subwidget: 
-                                                  self._mark_and_remove_highlight(ids, widget))
+                            # Usa la nuova funzione di caricamento
+                            chat_key = f"comune_{self.current_user['id']}"
+                            self._last_chat_message_id[chat_key] = 0  # Reset per caricare tutto
+                            self._load_common_messages_display(subwidget, chat_key)
                             break
         except Exception as e:
             print(f"Errore inizializzazione chat comune: {e}")
-
-    def _count_unread_messages_fast(self):
-        """Conta messaggi non letti in modo ottimizzato"""
-        if not self.current_user:
-            return 0
-        
-        counts = self._count_unread_by_category_fast()
-        return sum(counts.values())
 
     def _get_chat_users_cache(self):
         """Cache per i dati degli utenti - una sola query"""
@@ -6248,42 +7507,6 @@ class DeDToolGUI:
         users = {user['id']: user for user in cursor.fetchall()}
         cursor.close()
         return users
-
-    def get_chat_messages_batch(self, chat_type, last_message_id, limit=50):
-        """Ottiene messaggi in batch ottimizzati"""
-        conn, cursor = self.safe_cursor()
-        
-        try:
-            if chat_type == 'comune':
-                cursor.execute("""
-                    SELECT c.id, c.message, c.created_at, c.sender_id
-                    FROM chat_messages c
-                    WHERE c.receiver_id IS NULL 
-                      AND c.is_secret = 0
-                      AND c.id > %s
-                    ORDER BY c.created_at ASC
-                    LIMIT %s
-                """, (last_message_id, limit))
-            else:
-                # Query ottimizzata per chat segreta
-                cursor.execute("""
-                    SELECT c.id, c.message, c.created_at, c.sender_id, c.receiver_id
-                    FROM chat_messages c
-                    WHERE c.is_secret = 1
-                      AND ((c.sender_id = %s AND c.receiver_id = %s)
-                           OR (c.sender_id = %s AND c.receiver_id = %s))
-                      AND c.id > %s
-                    ORDER BY c.created_at ASC
-                    LIMIT %s
-                """, (self.current_user['id'], last_message_id, 
-                      last_message_id, self.current_user['id'], 
-                      last_message_id, limit))
-            
-            return cursor.fetchall()
-            
-        finally:
-            cursor.close()
-            conn.close()
 
     def _count_unread_by_category_fast(self):
         """Conta messaggi non letti - Versione OTTIMIZZATA"""
@@ -6318,13 +7541,13 @@ class DeDToolGUI:
             cursor.close()
 
     def create_chat_interface_fast(self, parent, chat_type='comune'):
+        """Interfaccia chat comune con funzionamento simile alla chat segreta"""
         if not hasattr(self, '_last_chat_message_id'):
             self._last_chat_message_id = {}
         
         chat_key = f"{chat_type}_{self.current_user['id']}"
         
-        # 🔥 CORREZIONE: Inizializza last_id a 0, non a 0 direttamente nel dict
-        # Verifica se esiste già un valore, altrimenti imposta a 0
+        # Inizializza last_id a 0
         if chat_key not in self._last_chat_message_id:
             self._last_chat_message_id[chat_key] = 0
         
@@ -6337,59 +7560,25 @@ class DeDToolGUI:
         messages_text.config(state='disabled')
         
         # Configura tag per messaggi nuovi
-        try:
-            messages_text.tag_configure("new_message",
-                                        background='#e8f5e8',
-                                        foreground='#2c3e50',
-                                        font=('Arial', 10, 'normal'))
-        except Exception as e:
-            print(f"Errore tag_configure: {e}")
+        messages_text.tag_configure("new_message",
+                                    background='#e8f5e8',
+                                    foreground='#2c3e50',
+                                    font=('Arial', 10, 'normal'))
         
-        # Input area
+        # Input area - 🔥 QUESTA ERA LA PARTE MANCANTE!
         input_frame = ttk.Frame(parent)
         input_frame.pack(fill='x', padx=5, pady=5)
         
         message_entry = ttk.Entry(input_frame)
         message_entry.pack(side='left', fill='x', expand=True, padx=5)
         
-        def send_message():
-            message = message_entry.get().strip()
-            if not message:
-                return
-            
-            try:
-                conn, cursor = self.safe_cursor()
-                
-                cursor.execute("""
-                    INSERT INTO chat_messages (sender_id, receiver_id, is_secret, message)
-                    VALUES (%s, NULL, 0, %s)
-                """, (self.current_user['id'], message))
-                
-                # 🔥 MODIFICA: Marca subito come letto il MIO messaggio ma NON evidenziarlo
-                new_msg_id = cursor.lastrowid
-                cursor.execute("""
-                    INSERT IGNORE INTO chat_reads (user_id, message_id) VALUES (%s, %s)
-                """, (self.current_user['id'], new_msg_id))
-                
-                conn.commit()  # 🔥 MODIFICA: usa conn invece di self.db
-                cursor.close()
-                
-                message_entry.delete(0, tk.END)
-                
-                # 🔥 Aggiorna immediatamente ma senza evidenziazione per i miei messaggi
-                self.load_chat_messages_fast(messages_text, chat_type)
-                messages_text.see(tk.END)
-                
-            except Exception as e:
-                messagebox.showerror("Errore", f"Errore invio messaggio: {e}")
-        
-        # 🔥 AGGIUNGI QUESTE 3 RIGHE CHE MANCANO:
-        send_btn = ttk.Button(input_frame, text="📤 Invia", command=send_message)
+        send_btn = ttk.Button(input_frame, text="📤 Invia", command=lambda: self._send_common_message(message_entry, messages_text))
         send_btn.pack(side='right', padx=5)
-        message_entry.bind('<Return>', lambda e: send_message())
         
+        message_entry.bind('<Return>', lambda e: self._send_common_message(message_entry, messages_text))
+            
         def load_messages_periodic():
-            """Polling ottimizzato per chat comune"""
+            """Polling per chat comune - Versione simile a quella segreta"""
             if not hasattr(parent, '_polling_active') or not parent._polling_active:
                 return
             
@@ -6398,10 +7587,8 @@ class DeDToolGUI:
             try:
                 was_at_bottom = messages_text.yview()[1] >= 0.95
                 
-                # 1. Carica i nuovi messaggi con evidenziazione
-                self.load_chat_messages_fast(messages_text, 'comune')
-                
-                # 🔥 2. NON programmare più la rimozione qui - ora gestita in load_chat_messages_fast
+                # Carica i messaggi
+                self._load_common_messages_display(messages_text, chat_key)
                 
                 if was_at_bottom:
                     messages_text.see(tk.END)
@@ -6420,6 +7607,13 @@ class DeDToolGUI:
         
         parent.load_messages_periodic = load_messages_periodic
         
+        # Inizializza polling
+        parent._polling_active = True
+        parent._polling_scheduled = False
+        
+        # Avvia il polling
+        load_messages_periodic()
+        
         def clean_up_polling():
             """Pulizia risorse"""
             try:
@@ -6429,13 +7623,6 @@ class DeDToolGUI:
                 if hasattr(parent, 'after_id'):
                     try:
                         parent.after_cancel(parent.after_id)
-                    except:
-                        pass
-                
-                # 🔥 Cancella anche il timer di evidenziazione
-                if hasattr(parent, '_highlight_timer'):
-                    try:
-                        parent.after_cancel(parent._highlight_timer)
                     except:
                         pass
                 
@@ -6453,120 +7640,127 @@ class DeDToolGUI:
                 clean_up_polling()
         
         parent.bind("<Destroy>", on_parent_destroy)
-
-        def mark_all_existing_messages_as_read():
-            """Segna come letti tutti i messaggi esistenti della chat comune"""
-            try:
-                conn, cursor = self.safe_cursor()
-                
-                # Query più efficiente
-                cursor.execute("""
-                    INSERT IGNORE INTO chat_reads (user_id, message_id)
-                    SELECT %s, c.id
-                    FROM chat_messages c
-                    WHERE c.receiver_id IS NULL
-                      AND c.is_secret = 0
-                      AND c.sender_id != %s
-                """, (self.current_user['id'], self.current_user['id']))
-                
-                self.db.commit()
-                cursor.close()
-                
-                # 🔥 Aggiungi: aggiorna contatore
-                self.update_chat_button_fast()
-                
-            except Exception as e:
-                print(f"Errore mark_all_existing_messages_as_read: {e}")
         
-        def initialize_chat():
-            """Caricamento iniziale COMPLETO con evidenziazione NEW"""
-            try:
-                current_messages_text = messages_text
-                current_parent = parent
-                current_user_id = self.current_user['id']
-                
-                conn, cursor = self.safe_cursor()
-
-                # 🔥 QUERY SEMPLIFICATA e CORRETTA per evidenziazione
-                cursor.execute("""
-                    SELECT 
-                        c.id,
-                        c.message,
-                        c.created_at,
-                        c.sender_id,
-                        -- 🔥 CORREZIONE: Messaggio è NUOVO se NON è stato letto da questo utente
-                        (CASE 
-                            WHEN EXISTS (
-                                SELECT 1 FROM chat_reads r 
-                                WHERE r.message_id = c.id AND r.user_id = %s
-                            ) THEN 0
-                            ELSE 1
-                        END) AS is_new
-                    FROM chat_messages c
-                    WHERE c.receiver_id IS NULL
-                      AND c.is_secret = 0
-                    ORDER BY c.id ASC
-                    LIMIT 200
-                """, (current_user_id,))
-
-                all_messages = cursor.fetchall()
-
-                # === reset area messaggi ===
-                current_messages_text.config(state='normal')
-                current_messages_text.delete("1.0", tk.END)
-
-                if all_messages:
-                    # registra ultimo ID per il polling successivo
-                    chat_key = f"{chat_type}_{current_user_id}"
-                    self._last_chat_message_id[chat_key] = max(msg['id'] for msg in all_messages)
-
-                    # === CARICA I MESSAGGI ===
-                    unread_ids_to_mark = []
-                    
-                    for msg in all_messages:
-                        created_at = msg.get('created_at')
-                        date_str = created_at.strftime("%d/%m/%Y %H:%M:%S") if created_at else ""
-
-                        sender_name = self._chat_users_cache.get(
-                            msg['sender_id'], {}
-                        ).get('username', 'Unknown')
-
-                        message_line = f"[{date_str}] {sender_name}: {msg['message']}\n"
-
-                        # 🌟 Evidenzia SOLO i messaggi NON letti E non inviati da me
-                        if msg.get("is_new") == 1 and msg['sender_id'] != current_user_id:
-                            current_messages_text.insert(tk.END, message_line, ("new_message",))
-                            unread_ids_to_mark.append(msg['id'])
-                        else:
-                            current_messages_text.insert(tk.END, message_line)
-
-                    # Marca come letti dopo 3 secondi
-                    if unread_ids_to_mark:
-                        current_parent.after(3000, lambda ids=unread_ids_to_mark, 
-                                                      widget=current_messages_text: 
-                                                      self._mark_and_remove_highlight(ids, widget))
-
-                # Chiudi editing area
-                current_messages_text.config(state='disabled')
-                
-                # Vai in fondo
-                current_messages_text.see(tk.END)
-
-                # Chiudi DB
-                self.close_connection(conn, cursor)
-
-            except Exception as e:
-                print(f"Errore inizializzazione chat: {e}")
-                import traceback
-                traceback.print_exc()
-        
-        parent.after(100, initialize_chat)
-        
-        # 🔥 AGGIUNGI QUESTA RIGA ALLA FINE:
-        parent.initialize_chat = initialize_chat
-        
-        # 🔥 RITORNA IL PARENT PER REFERENZIARLO
         return parent
+        
+    def _load_common_messages_display(self, text_widget, chat_key):
+        """Carica e mostra i messaggi della chat comune - Versione simile a chat segreta"""
+        try:
+            user_id = self.current_user['id']
+            
+            conn, cursor = self.safe_cursor()
+            
+            # 🔥 QUERY OTTIMIZZATA: simile a quella della chat segreta
+            cursor.execute("""
+                SELECT 
+                    c.id, 
+                    c.message, 
+                    c.created_at,
+                    c.sender_id,
+                    CASE 
+                        WHEN r.id IS NULL AND c.sender_id != %s THEN 1 
+                        ELSE 0 
+                    END as is_new
+                FROM chat_messages c
+                LEFT JOIN chat_reads r ON c.id = r.message_id AND r.user_id = %s
+                WHERE c.receiver_id IS NULL
+                  AND c.is_secret = 0
+                ORDER BY c.created_at DESC
+                LIMIT 100
+            """, (user_id, user_id))
+            
+            msgs = cursor.fetchall()
+            
+            # 🔥 MARCA COME LETTI IN BATCH
+            new_msg_ids = [m['id'] for m in msgs if m['is_new'] == 1]
+            
+            if new_msg_ids:
+                # Query batch per marcare come letti
+                placeholders = ','.join(['%s'] * len(new_msg_ids))
+                cursor.execute(f"""
+                    INSERT IGNORE INTO chat_reads (user_id, message_id)
+                    SELECT %s, id FROM chat_messages WHERE id IN ({placeholders})
+                """, [user_id] + new_msg_ids)
+                conn.commit()
+            
+            # 🔥 AGGIORNA L'ULTIMO ID (il più grande)
+            if msgs:
+                self._last_chat_message_id[chat_key] = max(m['id'] for m in msgs)
+            
+            # 🔥 MOSTRA MESSAGGI (in ordine cronologico inverso per visualizzazione)
+            text_widget.config(state='normal')
+            text_widget.delete(1.0, tk.END)  # 🔥 Cancella e ricarica tutto (come fa la chat segreta)
+            
+            for m in reversed(msgs):  # Ordine cronologico corretto
+                created_at = m.get('created_at')
+                if created_at:
+                    date_str = created_at.strftime('%d/%m/%Y %H:%M:%S')
+                else:
+                    date_str = ''
+                
+                sender_name = self._chat_users_cache.get(m['sender_id'], {}).get('username', 'Unknown')
+                
+                if m['sender_id'] == user_id:
+                    header = f"[{date_str}] Tu: "
+                else:
+                    header = f"[{date_str}] {sender_name}: "
+                
+                text_widget.insert(tk.END, header)
+                text_widget.insert(tk.END, m['message'] + "\n")
+                
+                # 🔥 EVIDENZIA IN VERDE CHIARO SOLO I NUOVI MESSAGGI
+                if m['is_new'] == 1:
+                    start_idx = text_widget.index("end-2l linestart")
+                    end_idx = text_widget.index("end-1l lineend")
+                    text_widget.tag_add("new_message", start_idx, end_idx)
+            
+            text_widget.config(state='disabled')
+            text_widget.see(tk.END)
+            
+            # 🔥 AGGIORNA IL CONTATORE
+            self.update_chat_button_fast()
+            
+            self.close_connection(conn, cursor)
+            
+        except Exception as e:
+            print(f"Errore caricamento chat comune: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _send_common_message(self, message_entry, messages_text):
+        """Invia messaggio nella chat comune - Versione semplificata"""
+        text = message_entry.get().strip()
+        if not text:
+            return
+        
+        try:
+            conn, cursor = self.safe_cursor()
+            
+            # Inserisci il messaggio
+            cursor.execute("""
+                INSERT INTO chat_messages (sender_id, receiver_id, is_secret, message, created_at)
+                VALUES (%s, NULL, 0, %s, NOW())
+            """, (self.current_user['id'], text))
+            
+            # Marca come letto immediatamente (mio messaggio)
+            new_msg_id = cursor.lastrowid
+            cursor.execute("""
+                INSERT IGNORE INTO chat_reads (user_id, message_id) VALUES (%s, %s)
+            """, (self.current_user['id'], new_msg_id))
+            
+            conn.commit()
+            cursor.close()
+            
+            message_entry.delete(0, tk.END)
+            
+            # 🔥 FORZA IL REFRESH DEI MESSAGGI
+            chat_key = f"comune_{self.current_user['id']}"
+            self._load_common_messages_display(messages_text, chat_key)
+            
+            print(f"✅ Messaggio comune inviato (ID: {new_msg_id})")
+            
+        except Exception as e:
+            messagebox.showerror("Errore", f"Errore invio messaggio: {e}")
 
     def _mark_and_remove_highlight(self, message_ids, text_widget):
         """
@@ -6603,80 +7797,6 @@ class DeDToolGUI:
             import traceback
             traceback.print_exc()
         
-    def load_chat_messages_fast(self, text_widget, chat_type='comune'):
-        try:
-            chat_key = f"{chat_type}_{self.current_user['id']}"
-            last_id = self._last_chat_message_id.get(chat_key, 0)
-
-            conn, cursor = self.safe_cursor()
-
-            # 🔥 QUERY CORRETTA per evidenziazione nuovi messaggi
-            cursor.execute("""
-                SELECT 
-                    c.id,
-                    c.message,
-                    c.created_at,
-                    c.sender_id,
-                    -- 🔥 CORREZIONE: Messaggio è NUOVO se NON è stato letto da questo utente
-                    (CASE 
-                        WHEN EXISTS (
-                            SELECT 1 FROM chat_reads r 
-                            WHERE r.message_id = c.id AND r.user_id = %s
-                        ) THEN 0
-                        ELSE 1
-                    END) AS is_new
-                FROM chat_messages c
-                WHERE c.receiver_id IS NULL
-                  AND c.is_secret = 0
-                  AND c.id > %s
-                ORDER BY c.id ASC
-                LIMIT 100
-            """, (self.current_user['id'], last_id))
-
-            new_messages = cursor.fetchall()
-            cursor.close()
-
-            if not new_messages:
-                return
-
-            # aggiorna ultimo ID
-            self._last_chat_message_id[chat_key] = new_messages[-1]['id']
-
-            text_widget.config(state='normal')
-
-            unread_ids_to_mark = []
-            
-            for msg in new_messages:
-                created_at = msg.get('created_at')
-                date_str = created_at.strftime("%d/%m/%Y %H:%M:%S") if created_at else ""
-                sender_name = self._chat_users_cache.get(msg['sender_id'], {}).get('username', 'Unknown')
-                message_line = f"[{date_str}] {sender_name}: {msg['message']}\n"
-
-                # applica highlight SOLO se messaggio non letto E non inviato da me
-                if msg.get("is_new") == 1 and msg['sender_id'] != self.current_user['id']:
-                    text_widget.insert(tk.END, message_line, ("new_message",))
-                    unread_ids_to_mark.append(msg['id'])
-                else:
-                    text_widget.insert(tk.END, message_line)
-
-            text_widget.config(state='disabled')
-            text_widget.see(tk.END)
-            
-            # 🔥 TROVA IL PARENT CORRETTO per schedule del timer
-            parent_widget = text_widget.master.master  # text_widget → messages_frame → parent
-            
-            # Marca come letti dopo 3 secondi
-            if unread_ids_to_mark:
-                print(f"✅ {len(unread_ids_to_mark)} nuovi messaggi evidenziati")
-                parent_widget.after(3000, lambda ids=unread_ids_to_mark, 
-                                             widget=text_widget: 
-                                             self._mark_and_remove_highlight(ids, widget))
-
-        except Exception as e:
-            print(f"Errore load_chat_messages_fast: {e}")
-            import traceback
-            traceback.print_exc()
-
     def mark_common_chat_as_read(self):
         """Marca tutti i messaggi della chat comune come letti"""
         conn, cursor = self.safe_cursor()
@@ -6762,7 +7882,6 @@ class DeDToolGUI:
                 if item:
                     tree.selection_set(item)
                     contact_id = int(item)
-                    print(f"Debug: Apertura chat con contatto ID: {contact_id}")
                     self._open_secret_chat_window(contact_id)
             except ValueError as ve:
                 print(f"Errore conversione ID: {ve}")
@@ -6777,8 +7896,6 @@ class DeDToolGUI:
 
         # Salva per aggiornamenti automatici
         self.secret_contacts_tree = tree
-        
-        print(f"Debug: Tree creato con {len(tree.get_children())} contatti")
 
     def _load_secret_conversations_list(self, tree):
         """Versione corretta per contare SOLO messaggi ricevuti non letti"""

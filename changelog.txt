@@ -13,6 +13,7 @@
 ### Miglioramenti:
 - Finestre di dialogo ora rimangono in primo piano
 - Pulsanti meglio organizzati nel menu banche
+- Chat eliminati i messaggi ripetuti
 
 
 ## VERSIONE 1.0.2 (Precedente anno di sviluppo 2025)
