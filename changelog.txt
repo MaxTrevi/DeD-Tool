@@ -1,0 +1,103 @@
+# CHANGELOG - D&D Tool
+
+## VERSIONE 1.0.4 (Data di rilascio 21/05/2026)
+### Chat:
+- Ottimizzato il caricamento della chat comune e segreta con polling incrementale: dopo il primo storico vengono letti solo i messaggi nuovi.
+- Corretto il commit della chat segreta sulla connessione corretta del pool.
+- Corretto il conteggio dei messaggi non letti per escludere i messaggi inviati dall'utente corrente.
+
+### Obiettivi dei seguaci:
+- Corretto l'avanzamento degli obiettivi: il prelievo dalla banca ora è proporzionale al delta reale di `progress_percentage`.
+- Evitato il doppio avanzamento degli obiettivi quando il calendario avanza per settimane o mesi.
+- La gestione progresso/costo/saldo banca viene eseguita in transazione.
+- Gli imprevisti con mesi aggiuntivi o ridotti aggiornano `estimated_months` e ricalibrano la percentuale di progresso.
+- Gli imprevisti con costo aggiuntivo o ridotto aggiornano `total_cost` e influenzano i prelievi futuri.
+
+### Banche:
+- Il trasferimento fondi aggiorna entrambi i saldi e registra le due transazioni `TRASFERIMENTO_OUT` e `TRASFERIMENTO_IN` in una singola transazione atomica.
+- I giocatori possono trasferire solo tra banche dei propri PG; il DM può trasferire tra tutte le banche.
+- Bloccata l'eliminazione di una banca se esistono dati collegati in transazioni, oggetti banca, seguaci, obiettivi, attività economiche o spese fisse.
+
+### Seguaci:
+- Verificato il menu Seguaci, inclusi obiettivi e imprevisti collegati.
+- Bloccata l'eliminazione di un seguace se esistono obiettivi collegati 
+- In creazione obiettivo, la banca costi viene filtrata solo sulle banche del PG proprietario del seguace selezionato.
+- In modifica obiettivo, se cambia il seguace viene ricalcolata la lista delle banche disponibili per il nuovo PG.
+
+### Attività Economiche:
+- L'avanzamento di più mesi Mystara applica le attività mensili una volta per ogni mese avanzato.
+- L'aggiornamento saldo banca e la registrazione storico dell'attività economica vengono eseguiti in transazione.
+
+### Spese Fisse:
+- Il prelievo delle spese fisse viene eseguito con aggiornamento atomico sul saldo corrente della banca, evitando errori con più spese sulla stessa banca.
+
+### Gestione Tempo:
+- Il cambio data manuale è consentito solo al DM.
+- Se la data manuale è nel futuro, il sistema applica i giorni intermedi con avanzamento tempo, includendo attività, spese, obiettivi, imprevisti e interessi.
+- Se la data manuale è nel passato, il sistema aggiorna solo la data dopo conferma, senza invertire eventi economici già applicati.
+
+### Utenti:
+- Il menu Utenti e le azioni aggiungi/modifica/elimina verificano esplicitamente il ruolo DM.
+- Aggiunta verifica username duplicato in creazione e modifica utente.
+- Bloccata l'eliminazione di un utente se esistono PG, banche, movimenti bancari o chat collegati.
+
+### Stato Campagna:
+- Corretto l'export dello stato campagna rendendo coerente il pulsante come esportazione TXT.
+- La vista Stato Campagna include ora anche oggetti in banca e imprevisti collegati agli obiettivi.
+- Per i giocatori, le query dello Stato Campagna filtrano i dati lato SQL sui PG dell'utente loggato.
+
+### Diario:
+- Il controllo nuova versione considera nuovo solo un diario remoto con versione maggiore
+- Il download del PDF usa un timeout per evitare blocchi della GUI su connessioni sospese.
+- Il lampeggio del pulsante Diario viene fermato solo dopo download riuscito e aggiornamento DB.
+- Il file continua a essere salvato come `Diario_Campagna.pdf` per mantenere validi i collegamenti desktop dei giocatori.
+
+## VERSIONE 1.0.3 (Data di rilascio 05/01/2026)
+### Nuove Funzionalità:
+- Aggiunto nel menu "informazioni" il ChangeLog un file che descrive i cambiamenti al programma
+- Sistema completo deposito/ritiro/vendita oggetti nelle banche
+- Trattativa prezzo oggetti tra giocatore e DM
+- Stato oggetti: Depositato, In vendita, Rifiutato, Venduto, Ritirato
+- Sistema di notifiche per oggetti in banca che vengono valutati o rifiutati
+- DM può eliminare oggetti venduti/ritirati dai personaggi
+- Popup dettagli oggetti con data Mystara
+
+### Miglioramenti:
+- Finestre di dialogo ora rimangono in primo piano
+- Pulsanti meglio organizzati nel menu banche
+- Chat eliminati i messaggi ripetuti
+
+
+## VERSIONE 1.0.2 (Precedente anno di sviluppo 2025)
+1° Versione rilasciata
+Il software si auto aggiorna da solo se trova una versione più recente in rete
+Menu aperti ai giocatori:
+
+Menu 1 voce 	2 "Lista PG"
+Menu 2 voce 	2 "Lista Conti"
+		5 "Deposita Denaro"
+		6 "preleva Denaro"
+		7 "Trasferisci Fondi tra Banche"
+		8 "Visualizza Storico Operazioni"
+Menu 3 voce	2 "Lista Seguaci"
+		9 "Lista Obiettivi Dettagliata"
+		10 "Visualizza Cronologia Imprevisti"
+Menu 4 voce	2 "Lista Attività Economiche"
+Menu 5 voce	2 "Lista Spese Fisse"
+Menu 9 voce	9 "Visualizza Stato (DM/GIOCATORE)"
+Menu 11		Scarica Diario della Campagna
+Menu 12		Chat
+
+Avrete sempre sotto controllo:
+
+i fondi bancari con gli interessi maturati
+le attività economiche
+le spese fisse.
+
+Tutti questi elementi verranno aggiornati automaticamente con il passare del tempo, insieme al progresso mensile e alla percentuale di completamento degli obiettivi dei vostri seguaci, anche in termini di passaggio di livello.
+
+Inoltre, il DM potrà modificare in qualsiasi momento seguaci, attività, spese, e altri dati in base all’evoluzione della campagna: ad esempio, al cambio di livello, mansione o situazione economica.
+
+La possibilità di scaricare il diario della campagna è molto utile perché il software controlla se siete già in possesso dell'ultima versione e vi da la possibilità di fare il download della stessa in caso vi siano degli update da parte mia.
+
+Infine, la chat permette di scambiarsi messaggi sia privati che in comune, cosa molto utile in alcune circostanze.
