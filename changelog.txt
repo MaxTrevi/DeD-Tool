@@ -2,6 +2,11 @@
 
 ## VERSIONE 1.0.5 (Data di rilascio 22/05/2026)
 
+### Aggiornamento 16/06/2026 - Diario/Missioni:
+- Il popup Diario/Missione ora e' ridimensionabile.
+- I campi Contenuto e Note DM hanno una barra di scorrimento verticale e si adattano quando la finestra viene allargata o ristretta.
+- Nessuno script SQL richiesto.
+
 ### Aggiornamento 03/06/2026 - Pulizia:
 - Ripulito il codice della Scheda Personaggio rimuovendo vecchie funzioni duplicate o non piu' usate.
 - Eseguita la pulizia DB legacy dopo verifica del software.

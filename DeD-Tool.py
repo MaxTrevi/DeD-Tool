@@ -17,7 +17,7 @@ import re
 import threading
 from dbutils.pooled_db import PooledDB
 
-__VERSION__ = "1.0.5"
+__VERSION__ = "1.0.6"
 
 # URL per aggiornamenti
 VERSION_URL = "https://raw.githubusercontent.com/MaxTrevi/DeD-Tool/main/version.txt"
@@ -14865,8 +14865,13 @@ class DeDToolGUI:
         dialog = tk.Toplevel(self.root)
         dialog.title("Diario / Missione")
         dialog.geometry("620x560")
+        dialog.minsize(560, 460)
+        dialog.resizable(True, True)
         dialog.transient(self.root)
         dialog.grab_set()
+        dialog.columnconfigure(1, weight=1)
+        dialog.rowconfigure(4, weight=4)
+        dialog.rowconfigure(5, weight=2)
         title_entry = ttk.Entry(dialog, width=55)
         type_combo = ttk.Combobox(dialog, values=['DIARIO', 'MISSIONE', 'INDIZIO', 'PNG', 'LUOGO', 'OGGETTO_MISSIONE', 'NOTA'], width=52)
         status_combo = ttk.Combobox(dialog, values=['APERTO', 'IN_CORSO', 'COMPLETATO', 'FALLITO', 'ARCHIVIATO'], width=52)
@@ -14875,12 +14880,12 @@ class DeDToolGUI:
         for row, (label, widget) in enumerate(fields):
             ttk.Label(dialog, text=f"{label}:").grid(row=row, column=0, sticky='w', padx=10, pady=5)
             widget.grid(row=row, column=1, sticky='ew', padx=10, pady=5)
-        content_text = tk.Text(dialog, width=58, height=12)
+        content_text = scrolledtext.ScrolledText(dialog, width=58, height=12, wrap='word')
         ttk.Label(dialog, text="Contenuto:").grid(row=4, column=0, sticky='nw', padx=10, pady=5)
         content_text.grid(row=4, column=1, sticky='nsew', padx=10, pady=5)
-        dm_text = tk.Text(dialog, width=58, height=5)
+        dm_text = scrolledtext.ScrolledText(dialog, width=58, height=5, wrap='word')
         ttk.Label(dialog, text="Note DM:").grid(row=5, column=0, sticky='nw', padx=10, pady=5)
-        dm_text.grid(row=5, column=1, sticky='ew', padx=10, pady=5)
+        dm_text.grid(row=5, column=1, sticky='nsew', padx=10, pady=5)
         visible_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(dialog, text="Visibile al giocatore", variable=visible_var, state='normal' if is_dm else 'disabled').grid(row=6, column=1, sticky='w', padx=10, pady=5)
         if entry:
@@ -14944,8 +14949,12 @@ class DeDToolGUI:
                 cursor.close()
                 messagebox.showerror("Errore", f"Errore salvataggio diario: {e}")
 
-        ttk.Button(dialog, text="Salva", command=save).grid(row=7, column=0, pady=10)
-        ttk.Button(dialog, text="Annulla", command=dialog.destroy).grid(row=7, column=1, pady=10)
+        button_frame = ttk.Frame(dialog)
+        button_frame.grid(row=7, column=0, columnspan=2, sticky='ew', padx=10, pady=10)
+        button_frame.columnconfigure(0, weight=1)
+        button_frame.columnconfigure(1, weight=1)
+        ttk.Button(button_frame, text="Salva", command=save).grid(row=0, column=0, padx=10)
+        ttk.Button(button_frame, text="Annulla", command=dialog.destroy).grid(row=0, column=1, padx=10)
 
     def add_journal_entry_dialog(self, pg_id):
         self._journal_entry_dialog(pg_id)
