@@ -17,7 +17,7 @@ import re
 import threading
 from dbutils.pooled_db import PooledDB
 
-__VERSION__ = "1.0.6"
+__VERSION__ = "1.0.7"
 
 # URL per aggiornamenti
 VERSION_URL = "https://raw.githubusercontent.com/MaxTrevi/DeD-Tool/main/version.txt"
@@ -852,6 +852,7 @@ class DeDToolGUI:
             ("🏦 Banche", self.show_banks_menu),
             ("🛡️ Seguaci", self.show_followers_menu),
             ("📋 Scheda Personaggio", self.show_character_sheet_menu),
+            ("📅 Calendario Sessioni", self.show_sessions_menu),
             ("⚒️ Attività Economiche", self.show_economic_menu),
             ("💰 Spese Fisse", self.show_expenses_menu),
         ]
@@ -8718,6 +8719,37 @@ class DeDToolGUI:
         
         cursor.close()
         
+        # Prossima sessione reale (calendario gregoriano, separato da Mystara)
+        session_frame = ttk.LabelFrame(
+            self.content_frame,
+            text="📅 Prossima sessione",
+            padding=10
+        )
+        session_frame.pack(fill='x', padx=20, pady=(5, 10))
+        next_session = self.get_next_game_session()
+        if next_session:
+            session_text = self.format_game_session_datetime(next_session['scheduled_at'])
+            title = (next_session.get('title') or '').strip()
+            if title:
+                session_text += f"\n{title}"
+            ttk.Label(
+                session_frame,
+                text=session_text,
+                font=('Arial', 11, 'bold'),
+                justify='center'
+            ).pack(pady=3)
+            ttk.Button(
+                session_frame,
+                text="Dettagli e calendario",
+                command=self.show_sessions_menu
+            ).pack(pady=3)
+        else:
+            ttk.Label(
+                session_frame,
+                text="Nessuna sessione pianificata",
+                font=('Arial', 10, 'italic')
+            ).pack(pady=3)
+
         # Versione del software
         version_label = ttk.Label(self.content_frame,
                                  text=f"Versione {__VERSION__}",
@@ -8840,6 +8872,382 @@ class DeDToolGUI:
             
         except Exception as e:
             messagebox.showerror("Errore", f"Errore caricamento dettagli: {e}")
+
+    # ==================== CALENDARIO SESSIONI GREGORIANO ====================
+
+    def format_game_session_datetime(self, value):
+        """Formatta una data reale di sessione senza usare il calendario Mystara."""
+        if isinstance(value, str):
+            value = datetime.fromisoformat(value)
+        if not isinstance(value, datetime):
+            raise ValueError("Data sessione non valida")
+        weekdays = (
+            "Lunedi'", "Martedi'", "Mercoledi'", "Giovedi'",
+            "Venerdi'", "Sabato", "Domenica"
+        )
+        return f"{weekdays[value.weekday()]} {value.strftime('%d/%m/%Y alle %H:%M')}"
+
+    def get_next_game_session(self):
+        """Restituisce la prossima sessione PLANNED secondo l'orario del database."""
+        connection = cursor = None
+        try:
+            connection, cursor = self.safe_cursor()
+            cursor.execute("""
+                SELECT id, scheduled_at, title, notes, status
+                FROM game_sessions
+                WHERE status = 'PLANNED' AND scheduled_at >= NOW()
+                ORDER BY scheduled_at ASC, id ASC
+                LIMIT 1
+            """)
+            return cursor.fetchone()
+        except Exception:
+            # La home resta disponibile anche prima dell'esecuzione della migrazione.
+            return None
+        finally:
+            if cursor:
+                self.close_connection(connection, cursor)
+
+    def get_game_sessions(self, view='UPCOMING'):
+        """Carica sessioni future o storico dal calendario gregoriano condiviso."""
+        connection = cursor = None
+        try:
+            connection, cursor = self.safe_cursor()
+            if view == 'UPCOMING':
+                cursor.execute("""
+                    SELECT gs.id, gs.scheduled_at, gs.title, gs.notes, gs.status,
+                           u.username AS created_by_username
+                    FROM game_sessions gs
+                    LEFT JOIN users u ON u.id = gs.created_by
+                    WHERE gs.status = 'PLANNED' AND gs.scheduled_at >= NOW()
+                    ORDER BY gs.scheduled_at ASC, gs.id ASC
+                """)
+            else:
+                cursor.execute("""
+                    SELECT gs.id, gs.scheduled_at, gs.title, gs.notes, gs.status,
+                           u.username AS created_by_username
+                    FROM game_sessions gs
+                    LEFT JOIN users u ON u.id = gs.created_by
+                    WHERE gs.status <> 'PLANNED' OR gs.scheduled_at < NOW()
+                    ORDER BY gs.scheduled_at DESC, gs.id DESC
+                """)
+            return cursor.fetchall()
+        finally:
+            if cursor:
+                self.close_connection(connection, cursor)
+
+    def _selected_game_session_id(self):
+        tree = getattr(self, 'game_sessions_tree', None)
+        if not tree:
+            return None
+        selection = tree.selection()
+        if not selection:
+            return None
+        try:
+            return int(selection[0])
+        except (TypeError, ValueError):
+            return None
+
+    def show_sessions_menu(self):
+        """Mostra il calendario condiviso; la gestione resta riservata al DM."""
+        self.clear_content()
+        self.game_sessions_view = getattr(self, 'game_sessions_view', 'UPCOMING')
+
+        header = ttk.Frame(self.content_frame)
+        header.pack(fill='x', padx=15, pady=10)
+        ttk.Label(header, text="📅 Calendario Sessioni", style='Title.TLabel').pack(side='left')
+        ttk.Button(header, text="Torna alla Home", command=self.show_welcome_content).pack(side='right')
+
+        filters = ttk.Frame(self.content_frame)
+        filters.pack(fill='x', padx=15, pady=(0, 8))
+        ttk.Button(filters, text="Prossime", command=lambda: self.refresh_game_sessions('UPCOMING')).pack(side='left', padx=(0, 5))
+        ttk.Button(filters, text="Storico", command=lambda: self.refresh_game_sessions('HISTORY')).pack(side='left', padx=5)
+        ttk.Button(filters, text="Aggiorna", command=self.refresh_game_sessions).pack(side='left', padx=5)
+        self.game_sessions_filter_label = ttk.Label(filters, text="")
+        self.game_sessions_filter_label.pack(side='right')
+
+        tree_frame = ttk.Frame(self.content_frame)
+        tree_frame.pack(fill='both', expand=True, padx=15, pady=5)
+        columns = ('date', 'time', 'title', 'status')
+        tree = ttk.Treeview(tree_frame, columns=columns, show='headings', height=16)
+        for column, label, width in (
+            ('date', 'Data', 140), ('time', 'Ora', 80),
+            ('title', 'Titolo', 420), ('status', 'Stato', 130)
+        ):
+            tree.heading(column, text=label)
+            tree.column(column, width=width, anchor='center' if column != 'title' else 'w')
+        scrollbar = ttk.Scrollbar(tree_frame, orient='vertical', command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        tree.pack(side='left', fill='both', expand=True)
+        scrollbar.pack(side='right', fill='y')
+        tree.bind('<Double-1>', lambda _event: self.show_game_session_details())
+        self.game_sessions_tree = tree
+        self.game_sessions_by_id = {}
+
+        actions = ttk.Frame(self.content_frame)
+        actions.pack(fill='x', padx=15, pady=10)
+        ttk.Button(actions, text="Dettagli", command=self.show_game_session_details).pack(side='left', padx=4)
+        if self.current_user and self.current_user.get('role') == 'DM':
+            ttk.Button(actions, text="Nuova sessione", command=self.open_game_session_dialog).pack(side='left', padx=4)
+            ttk.Button(actions, text="Modifica", command=self.edit_selected_game_session).pack(side='left', padx=4)
+            ttk.Button(actions, text="Segna completata", command=lambda: self.set_game_session_status('COMPLETED')).pack(side='left', padx=4)
+            ttk.Button(actions, text="Annulla sessione", command=lambda: self.set_game_session_status('CANCELLED')).pack(side='left', padx=4)
+            ttk.Button(actions, text="Elimina definitivamente", command=self.delete_game_session).pack(side='left', padx=4)
+
+        self.refresh_game_sessions(self.game_sessions_view)
+
+    def refresh_game_sessions(self, view=None):
+        if view:
+            self.game_sessions_view = view
+        tree = getattr(self, 'game_sessions_tree', None)
+        if not tree or not tree.winfo_exists():
+            return
+        for item in tree.get_children():
+            tree.delete(item)
+        self.game_sessions_by_id = {}
+        try:
+            sessions = self.get_game_sessions(self.game_sessions_view)
+            status_labels = {'PLANNED': 'Pianificata', 'CANCELLED': 'Annullata', 'COMPLETED': 'Completata'}
+            for session in sessions:
+                scheduled_at = session['scheduled_at']
+                if isinstance(scheduled_at, str):
+                    scheduled_at = datetime.fromisoformat(scheduled_at)
+                    session['scheduled_at'] = scheduled_at
+                session_id = int(session['id'])
+                self.game_sessions_by_id[session_id] = session
+                tree.insert('', 'end', iid=str(session_id), values=(
+                    scheduled_at.strftime('%d/%m/%Y'), scheduled_at.strftime('%H:%M'),
+                    session.get('title') or 'Sessione D&D',
+                    status_labels.get(session.get('status'), session.get('status', ''))
+                ))
+            label = "Prossime sessioni" if self.game_sessions_view == 'UPCOMING' else "Storico sessioni"
+            self.game_sessions_filter_label.configure(text=f"{label}: {len(sessions)}")
+        except Exception as e:
+            messagebox.showerror(
+                "Calendario non disponibile",
+                "Impossibile caricare le sessioni. Verifica di avere eseguito "
+                f"lo script game_sessions_migration.sql.\n\nDettaglio: {e}"
+            )
+
+    def show_game_session_details(self):
+        session_id = self._selected_game_session_id()
+        session = getattr(self, 'game_sessions_by_id', {}).get(session_id)
+        if not session:
+            messagebox.showinfo("Calendario Sessioni", "Seleziona una sessione.")
+            return
+        status_labels = {'PLANNED': 'Pianificata', 'CANCELLED': 'Annullata', 'COMPLETED': 'Completata'}
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Dettaglio sessione")
+        dialog.geometry("620x430")
+        dialog.minsize(500, 340)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        frame = ttk.Frame(dialog, padding=15)
+        frame.pack(fill='both', expand=True)
+        ttk.Label(frame, text=session.get('title') or 'Sessione D&D', style='Subtitle.TLabel').pack(anchor='w')
+        ttk.Label(frame, text=self.format_game_session_datetime(session['scheduled_at'])).pack(anchor='w', pady=(8, 2))
+        ttk.Label(frame, text=f"Stato: {status_labels.get(session.get('status'), session.get('status'))}").pack(anchor='w')
+        ttk.Label(frame, text=f"Creata da: {session.get('created_by_username') or 'DM non disponibile'}").pack(anchor='w', pady=(0, 8))
+        ttk.Label(frame, text="Note:").pack(anchor='w')
+        notes = scrolledtext.ScrolledText(frame, wrap=tk.WORD, height=12)
+        notes.pack(fill='both', expand=True, pady=(3, 10))
+        notes.insert('1.0', session.get('notes') or 'Nessuna nota.')
+        notes.configure(state='disabled')
+        ttk.Button(frame, text="Chiudi", command=dialog.destroy).pack()
+
+    def edit_selected_game_session(self):
+        session_id = self._selected_game_session_id()
+        if session_id is None:
+            messagebox.showinfo("Calendario Sessioni", "Seleziona una sessione da modificare.")
+            return
+        self.open_game_session_dialog(session_id)
+
+    def open_game_session_dialog(self, session_id=None):
+        if not self.current_user or self.current_user.get('role') != 'DM':
+            messagebox.showerror("Accesso negato", "Solo il DM puo' gestire le sessioni.")
+            return
+        session = None
+        if session_id is not None:
+            session = getattr(self, 'game_sessions_by_id', {}).get(session_id)
+            if not session:
+                messagebox.showinfo("Calendario Sessioni", "Seleziona una sessione valida.")
+                return
+        initial = session['scheduled_at'] if session else datetime.now().replace(second=0, microsecond=0) + timedelta(hours=1)
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Modifica sessione" if session else "Nuova sessione")
+        dialog.geometry("620x520")
+        dialog.minsize(540, 450)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        form = ttk.Frame(dialog, padding=15)
+        form.pack(fill='both', expand=True)
+        date_frame = ttk.LabelFrame(form, text="Data e ora gregoriane", padding=10)
+        date_frame.pack(fill='x')
+        day_var = tk.StringVar(value=str(initial.day))
+        month_var = tk.StringVar(value=str(initial.month))
+        year_var = tk.StringVar(value=str(initial.year))
+        hour_var = tk.StringVar(value=f"{initial.hour:02d}")
+        minute_var = tk.StringVar(value=f"{initial.minute:02d}")
+        for column, (label, variable, width) in enumerate((
+            ('Giorno', day_var, 4), ('Mese', month_var, 4), ('Anno', year_var, 6),
+            ('Ora', hour_var, 4), ('Minuti', minute_var, 4)
+        )):
+            ttk.Label(date_frame, text=label).grid(row=0, column=column, padx=4)
+            ttk.Entry(date_frame, textvariable=variable, width=width).grid(row=1, column=column, padx=4, pady=4)
+        ttk.Label(form, text="Titolo (facoltativo, massimo 150 caratteri)").pack(anchor='w', pady=(12, 2))
+        title_var = tk.StringVar(value=(session.get('title') or '') if session else '')
+        ttk.Entry(form, textvariable=title_var).pack(fill='x')
+        ttk.Label(form, text="Note (facoltative)").pack(anchor='w', pady=(12, 2))
+        notes = scrolledtext.ScrolledText(form, wrap=tk.WORD, height=12)
+        notes.pack(fill='both', expand=True)
+        if session and session.get('notes'):
+            notes.insert('1.0', session['notes'])
+
+        def save():
+            try:
+                scheduled_at = datetime(
+                    int(year_var.get()), int(month_var.get()), int(day_var.get()),
+                    int(hour_var.get()), int(minute_var.get())
+                )
+            except (TypeError, ValueError):
+                messagebox.showerror("Data non valida", "Inserisci una data gregoriana e un orario validi.", parent=dialog)
+                return
+            title = title_var.get().strip()
+            session_notes = notes.get('1.0', tk.END).strip()
+            if len(title) > 150:
+                messagebox.showerror("Titolo non valido", "Il titolo non puo' superare 150 caratteri.", parent=dialog)
+                return
+            if scheduled_at <= datetime.now() and not session:
+                messagebox.showerror("Data non valida", "La nuova sessione deve essere nel futuro.", parent=dialog)
+                return
+            if scheduled_at <= datetime.now() and session and not messagebox.askyesno(
+                "Sessione storica", "La data selezionata e' gia' trascorsa. Vuoi salvare comunque?", parent=dialog
+            ):
+                return
+            summary = self.format_game_session_datetime(scheduled_at)
+            if not messagebox.askyesno("Conferma sessione", f"Salvare la sessione per:\n\n{summary}?", parent=dialog):
+                return
+            if self.save_game_session(session_id, scheduled_at, title, session_notes, parent=dialog):
+                dialog.destroy()
+                self.refresh_game_sessions()
+
+        buttons = ttk.Frame(form)
+        buttons.pack(fill='x', pady=(12, 0))
+        ttk.Button(buttons, text="Salva", command=save).pack(side='right', padx=4)
+        ttk.Button(buttons, text="Annulla", command=dialog.destroy).pack(side='right', padx=4)
+
+    def save_game_session(self, session_id, scheduled_at, title, notes, parent=None):
+        if not self.current_user or self.current_user.get('role') != 'DM':
+            messagebox.showerror("Accesso negato", "Solo il DM puo' gestire le sessioni.", parent=parent)
+            return False
+        connection = cursor = None
+        try:
+            connection, cursor = self.safe_cursor()
+            duplicate_query = "SELECT id FROM game_sessions WHERE scheduled_at = %s"
+            params = [scheduled_at]
+            if session_id is not None:
+                duplicate_query += " AND id <> %s"
+                params.append(session_id)
+            cursor.execute(duplicate_query + " LIMIT 1", tuple(params))
+            if cursor.fetchone() and not messagebox.askyesno(
+                "Orario gia' occupato", "Esiste gia' una sessione allo stesso orario. Salvare comunque?", parent=parent
+            ):
+                return False
+            if session_id is None:
+                cursor.execute("""
+                    INSERT INTO game_sessions (scheduled_at, title, notes, status, created_by)
+                    VALUES (%s, %s, %s, 'PLANNED', %s)
+                """, (scheduled_at, title or None, notes or None, self.current_user['id']))
+            else:
+                cursor.execute("""
+                    UPDATE game_sessions SET scheduled_at = %s, title = %s, notes = %s
+                    WHERE id = %s
+                """, (scheduled_at, title or None, notes or None, session_id))
+                if cursor.rowcount == 0:
+                    cursor.execute("SELECT id FROM game_sessions WHERE id = %s", (session_id,))
+                    if not cursor.fetchone():
+                        raise ValueError("La sessione non esiste piu'.")
+            connection.commit()
+            messagebox.showinfo("Calendario Sessioni", "Sessione salvata correttamente.", parent=parent)
+            return True
+        except Exception as e:
+            if connection:
+                connection.rollback()
+            messagebox.showerror("Errore", f"Impossibile salvare la sessione:\n{e}", parent=parent)
+            return False
+        finally:
+            if cursor:
+                self.close_connection(connection, cursor)
+
+    def set_game_session_status(self, status):
+        if not self.current_user or self.current_user.get('role') != 'DM':
+            messagebox.showerror("Accesso negato", "Solo il DM puo' gestire le sessioni.")
+            return
+        if status not in ('COMPLETED', 'CANCELLED'):
+            return
+        session_id = self._selected_game_session_id()
+        if session_id is None:
+            messagebox.showinfo("Calendario Sessioni", "Seleziona una sessione.")
+            return
+        action = "segnare come completata" if status == 'COMPLETED' else "annullare"
+        if not messagebox.askyesno("Conferma", f"Vuoi {action} la sessione selezionata?"):
+            return
+        self._update_game_session_status(session_id, status)
+
+    def _update_game_session_status(self, session_id, status):
+        """Aggiornamento difensivo dello stato, richiamabile solo da un DM."""
+        if not self.current_user or self.current_user.get('role') != 'DM':
+            messagebox.showerror("Accesso negato", "Solo il DM puo' gestire le sessioni.")
+            return
+        if status not in ('COMPLETED', 'CANCELLED'):
+            messagebox.showerror("Stato non valido", "Lo stato richiesto non e' consentito.")
+            return
+        connection = cursor = None
+        try:
+            connection, cursor = self.safe_cursor()
+            cursor.execute("UPDATE game_sessions SET status = %s WHERE id = %s", (status, session_id))
+            if cursor.rowcount == 0:
+                cursor.execute("SELECT id FROM game_sessions WHERE id = %s", (session_id,))
+                if not cursor.fetchone():
+                    raise ValueError("La sessione non esiste piu'.")
+            connection.commit()
+            self.refresh_game_sessions()
+        except Exception as e:
+            if connection:
+                connection.rollback()
+            messagebox.showerror("Errore", f"Impossibile aggiornare la sessione:\n{e}")
+        finally:
+            if cursor:
+                self.close_connection(connection, cursor)
+
+    def delete_game_session(self):
+        if not self.current_user or self.current_user.get('role') != 'DM':
+            messagebox.showerror("Accesso negato", "Solo il DM puo' gestire le sessioni.")
+            return
+        session_id = self._selected_game_session_id()
+        if session_id is None:
+            messagebox.showinfo("Calendario Sessioni", "Seleziona una sessione.")
+            return
+        if not messagebox.askyesno(
+            "Eliminazione definitiva",
+            "La sessione verra' rimossa definitivamente. Preferisci normalmente usare Annulla sessione.\n\nProcedere?"
+        ) or not messagebox.askyesno("Ultima conferma", "Confermi l'eliminazione definitiva?"):
+            return
+        connection = cursor = None
+        try:
+            connection, cursor = self.safe_cursor()
+            cursor.execute("DELETE FROM game_sessions WHERE id = %s", (session_id,))
+            if cursor.rowcount == 0:
+                raise ValueError("La sessione non esiste piu'.")
+            connection.commit()
+            self.refresh_game_sessions()
+        except Exception as e:
+            if connection:
+                connection.rollback()
+            messagebox.showerror("Errore", f"Impossibile eliminare la sessione:\n{e}")
+        finally:
+            if cursor:
+                self.close_connection(connection, cursor)
 
     def clear_content(self):
         for widget in self.content_frame.winfo_children():
@@ -14483,7 +14891,7 @@ class DeDToolGUI:
     def get_backup_table_names(self):
         """Elenco unico delle tabelle incluse nel backup/restore JSON."""
         return [
-            'users', 'player_characters', 'banks', 'bank_transactions',
+            'users', 'game_sessions', 'player_characters', 'banks', 'bank_transactions',
             'bank_items', 'bank_item_evaluations',
             'followers', 'economic_activities', 'fixed_expenses',
             'game_state', 'follower_objectives', 'follower_objective_events',

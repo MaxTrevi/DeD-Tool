@@ -1,5 +1,16 @@
 # CHANGELOG - D&D Tool
 
+## VERSIONE 1.0.7 (Data di rilascio 05/07/2026)
+
+### Calendario Sessioni:
+- Aggiunto un calendario gregoriano condiviso, consultabile dal menu principale sia dal DM sia dai giocatori.
+- La schermata iniziale mostra soltanto la prossima sessione pianificata, con giorno, data e ora esatti.
+- Le altre sessioni future e lo storico di quelle trascorse, completate o annullate sono disponibili nella pagina Calendario Sessioni.
+- Solo il DM puo' creare, modificare, completare, annullare o eliminare definitivamente una sessione; i giocatori accedono in sola lettura.
+- Il calendario delle sessioni reali e' separato dal calendario Mystara e non produce avanzamenti del tempo di gioco o movimenti economici.
+- Backup e ripristino JSON includono la nuova tabella `game_sessions`.
+- Prima di usare la funzione, eseguire manualmente `.github/docs/game_sessions_migration.sql` sul database MariaDB dopo avere effettuato un backup.
+
 ## VERSIONE 1.0.5 (Data di rilascio 22/05/2026)
 
 ### Aggiornamento 16/06/2026 - Diario/Missioni:
